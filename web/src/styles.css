@@ -34,6 +34,7 @@ h2 { font-size: 1rem; margin: 0 0 0.5rem; }
 h3 { font-size: 0.9rem; margin: 1.25rem 0 0.5rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 code { font-family: var(--mono); font-size: 0.85em; }
 .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.nowrap { white-space: nowrap; }
 .mono { font-family: var(--mono); font-size: 0.85em; }
 .muted { color: var(--muted); }
 .small { font-size: 0.85em; }
@@ -289,3 +290,94 @@ button.company:hover { border-color: var(--line); }
 .menu-pop hr { border: 0; border-top: 1px solid var(--line); margin: 0.3rem 0; width: 100%; }
 .menu-who { display: flex; flex-direction: column; padding: 0.4rem 0.6rem; }
 .avatar { width: 2rem; height: 2rem; border-radius: 50%; padding: 0; font-weight: 700; font-size: 0.78rem; background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+
+/* ---------- documents: upload options and multi-entry review ---------- */
+.upload-options { display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; margin: 0 0 0.75rem; }
+.upload-options label, .statement-summary label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; color: var(--muted); }
+.upload-options select, .statement-summary select { min-width: 14rem; }
+.warn.small { font-size: 0.85rem; }
+.st-ready { background: var(--accent-soft); color: var(--accent); }
+.st-needs_input { background: var(--warn-bg); }
+.st-posted, .st-accepted { color: var(--ok); }
+.st-in_books { color: var(--muted); }
+.st-skipped { color: var(--muted); text-decoration: line-through; }
+.statement-summary { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 1rem 2rem; padding: 0.75rem 1rem; margin-bottom: 0.75rem; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.statement-summary dl { display: grid; grid-template-columns: repeat(4, auto); gap: 0 1.5rem; margin: 0; }
+.statement-summary dt { font-size: 0.75rem; color: var(--muted); grid-row: 1; }
+.statement-summary dd { margin: 0; font-weight: 600; grid-row: 2; }
+.tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.list.entries td { vertical-align: top; }
+.list.entries td.desc { max-width: 26rem; overflow-wrap: anywhere; }
+.list.entries td.post-to { min-width: 15rem; }
+.list.entries td.post-to .reason { display: block; margin-top: 0.2rem; }
+.list.entries td.actions { white-space: nowrap; }
+.list.entries td.actions button { margin-left: 0.25rem; }
+.list.entries tr.st-row-in_books, .list.entries tr.st-row-skipped { opacity: 0.65; }
+.list.entries tr:hover { background: transparent; }
+.list.entries .issue { font-size: 0.8rem; margin-top: 0.2rem; padding-left: 0.4rem; border-left: 3px solid var(--line); }
+.list.entries .issue.error { border-left-color: var(--bad); color: var(--bad); }
+.list.entries .issue.warning { border-left-color: var(--warn-line); }
+.list.entries .issue.info { color: var(--muted); }
+.jlines { list-style: none; margin: 0.25rem 0 0; padding: 0; font-size: 0.82rem; font-family: var(--mono); }
+@media (max-width: 760px) {
+  .list.entries { display: block; overflow-x: auto; }
+  .statement-summary dl { grid-template-columns: repeat(2, auto); }
+  .statement-summary dt:nth-of-type(n+3) { grid-row: 3; }
+  .statement-summary dd:nth-of-type(n+3) { grid-row: 4; }
+}
+
+/* ---------- AI key dialog ---------- */
+button.ai-chip { background: var(--surface); cursor: pointer; }
+button.ai-chip.off { border-style: dashed; }
+button.ai-chip.off:hover { color: var(--accent); border-color: var(--accent); }
+.ai-key { max-width: 32rem; }
+.ai-key label { display: flex; flex-direction: column; gap: 0.3rem; }
+.ai-key .key-input { display: flex; gap: 0.4rem; }
+.ai-key .key-input input { flex: 1; min-width: 0; font-family: var(--mono); }
+.ai-key .small { font-size: 0.82rem; }
+
+/* ---------- voice chat ---------- */
+.voice.chat { width: min(400px, calc(100vw - 32px)); height: min(600px, calc(100vh - 90px)); padding: 0; gap: 0; overflow: hidden; }
+.chat-head { display: flex; align-items: center; gap: 0.6rem; padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--line); }
+.chat-title { display: flex; flex-direction: column; line-height: 1.25; flex: 1; min-width: 0; }
+.chat-avatar { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #fff; font-weight: 700; flex: none; }
+.chat-avatar.listening { background: var(--bad); animation: pulse 1s infinite; }
+.chat-avatar.speaking { box-shadow: 0 0 0 4px var(--accent-soft); animation: ring 1.2s ease-in-out infinite; }
+@keyframes ring { 50% { box-shadow: 0 0 0 7px var(--accent-soft); } }
+button.icon { padding: 0.2rem 0.45rem; font-size: 1rem; line-height: 1; }
+.lang-tabs { display: flex; gap: 0.25rem; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--line); }
+.lang-tabs button { flex: 1; font-size: 0.8rem; padding: 0.25rem 0.4rem; border-radius: 99px; }
+.lang-tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.voice.chat > .warn { margin: 0.5rem 0.75rem 0; }
+.chat-log { flex: 1; overflow-y: auto; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.45rem; background: var(--bg); }
+.chat-empty { display: flex; flex-direction: column; gap: 0.4rem; }
+.chat-empty p { margin: 0 0 0.2rem; }
+.chip { text-align: left; border-radius: 14px; font-size: 0.85rem; padding: 0.4rem 0.7rem; background: var(--surface); }
+.bubble { position: relative; max-width: 85%; padding: 0.5rem 0.7rem; border-radius: 14px; font-size: 0.9rem; line-height: 1.45; overflow-wrap: anywhere; }
+.bubble[lang='ta'] { line-height: 1.65; }
+.bubble.you { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+.bubble.ai { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 4px; padding-right: 2.1rem; }
+.bubble.ai.error { border-color: var(--bad); color: var(--bad); padding-right: 0.7rem; }
+.bubble.ai.speaking { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.bubble.interim { opacity: 0.65; font-style: italic; }
+.bubble .replay { position: absolute; right: 0.35rem; bottom: 0.35rem; width: 1.5rem; height: 1.5rem; padding: 0; border-radius: 50%; font-size: 0.6rem; line-height: 1; color: var(--accent); }
+.bubble.typing { display: flex; gap: 0.25rem; padding: 0.7rem 0.8rem; }
+.bubble.typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite; }
+.bubble.typing i:nth-child(2) { animation-delay: 0.2s; }
+.bubble.typing i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+.chat-card { align-self: stretch; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 0.5rem; }
+.chat-actions { display: flex; gap: 0.5rem; margin-top: 0.45rem; }
+.chat-compose { display: flex; gap: 0.45rem; padding: 0.6rem 0.75rem; border-top: 1px solid var(--line); background: var(--surface); }
+.chat-compose input { flex: 1; min-width: 0; border-radius: 99px; padding: 0.45rem 0.8rem; }
+.chat-compose .mic, .chat-compose .send { width: 40px; height: 40px; flex: none; border-radius: 50%; padding: 0; font-size: 1.05rem; background: var(--accent); border-color: var(--accent); color: #fff; }
+.chat-compose .mic.on { background: var(--bad); border-color: var(--bad); animation: pulse 1s infinite; }
+@media (prefers-reduced-motion: reduce) { .chat-avatar, .chat-compose .mic.on, .bubble.typing i { animation: none; } }
+
+/* ---------- "Kannaku" wake word ---------- */
+.voice .wake-row { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; text-align: left; gap: 0.5rem; padding: 0.45rem 0.75rem; margin: 0; border-bottom: 1px solid var(--line); font-size: 0.82rem; color: var(--text); cursor: pointer; }
+.voice .wake-row input { width: auto; margin: 0; flex: none; }
+.wake-row > span:first-of-type { flex: 1; }
+.wake-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: none; }
+.wake-dot.on { background: var(--ok); animation: pulse 2s infinite; }
+.voice-btn .wake-dot { margin-right: 0.4rem; vertical-align: 1px; }

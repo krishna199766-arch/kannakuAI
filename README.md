@@ -3,7 +3,8 @@
 A keyboard-first, AI-assisted double-entry accounting app for Indian businesses (GST), built from the
 [AI-First Accounting Platform spec](https://claude.ai/code/artifact/1d086c6c-3ed3-48f3-8a2a-ed11c86db758).
 
-Scanned bills and voice commands become **draft** vouchers that a person confirms. The AI never writes
+Uploaded documents (bills, invoices, bank statements, workings) and voice commands become **draft**
+vouchers that a person confirms, or that post on their own once you switch on Auto-post. The AI never writes
 to the ledger; a deterministic posting engine is the only path into it.
 
 ## Run it
@@ -29,17 +30,50 @@ purchases, sales, receipts and payments, to explore alongside your own books.
 
 For development with hot reload: `npm run dev`, then open http://localhost:5173.
 
-### Turn on AI (bill scanning and voice)
+### Turn on AI (bill reading and voice)
 
-```bash
-cp .env.example .env   # then set ANTHROPIC_API_KEY=...
-```
+Click **AI off** in the top bar, paste your Anthropic API key (from
+[console.anthropic.com → API keys](https://console.anthropic.com/settings/keys)) and press **Turn AI on**.
+The key is checked with Anthropic, saved to `.env` in the project folder, and used at once; no
+restart. Click **AI on** later to replace or remove it. Only a company owner can change the key.
 
-Restart the server. The top bar shows **AI on**. Without a key everything else works and the AI
-screens say what is missing.
+You can also put `ANTHROPIC_API_KEY=...` in `.env` yourself (see `.env.example`) and restart.
+Without a key everything else works, including Excel and CSV uploads.
 
 To try the bill-review screen without a key: stop the server, run `npm run demo:bill`, start again
 and press **R** on the Gateway.
+
+## Uploading documents
+
+Press **Ctrl+U** (or **R** on the Gateway) and drop files. Each file becomes ready-to-post entries:
+
+| Document | Files | Becomes | Needs AI |
+| --- | --- | --- | --- |
+| Purchase bill, expense receipt | PDF, photo | Purchase voucher (party, items, GST) | Yes |
+| Sales invoice you issued | PDF, photo | Sales voucher (detected by your GSTIN as the seller) | Yes |
+| Credit / debit notes | PDF, photo | Credit Note / Debit Note | Yes |
+| Bank statement | CSV, Excel | One Receipt / Payment / Contra per line | No (PDF statements: yes) |
+| Workings / journal sheet | Excel, CSV | Journal vouchers, grouped by JV number | No (free-form PDFs and photos: yes) |
+| Sales or purchase register | Excel, CSV | One Sales / Purchase voucher per row, new parties created | No |
+
+How a bank statement line is placed, in order:
+
+1. **Already in the books?** Same bank ledger, same amount, within 3 days: marked *in books* and never posted again (uploading an overlapping statement is safe).
+2. **Your earlier choice** for a similar narration (learned every time you post a line).
+3. **Built-in rules:** ATM / cash deposit to Cash, bank charges, interest, salary, rent, electricity, telephone, fuel.
+4. **A party named in the narration**, settling their open bill of the same amount.
+5. **The AI** (when on) chooses among your existing ledgers only; anything it is unsure of waits for you.
+
+Every proposed entry is checked by the posting engine before it is shown (dates, lock date, balance,
+GST). Entries that pass are **ready**; press **Ctrl+A** to post all of them. The rest are **to check**:
+pick a ledger inline, or **Edit** to open the full voucher screen. Excel files must be `.xlsx`
+(re-save old `.xls` files).
+
+**Auto-post** (Settings, off by default) posts ready entries straight after reading, up to a limit per
+entry (default ₹50,000); larger ones still wait for Ctrl+A.
+
+To try it on the sample company: `npm run samples --workspace server` writes a bank statement, a
+workings sheet and a sales register to `./samples`, dated to match the demo vouchers.
 
 ### Other commands
 
@@ -49,6 +83,10 @@ and press **R** on the Gateway.
 | `npm run typecheck` | TypeScript checks for server and web |
 | `npm run reset-db` | Deletes `./data` (all accounts and books); the next start shows sign-up again |
 | `npm run demo:bill` | Puts a sample extracted bill into the review queue (server must be stopped) |
+| `npm run samples --workspace server` | Writes sample documents to `./samples` for the Documents screen |
+
+`npm audit` reports a moderate advisory in `uuid`, pulled in by `exceljs`. The advisory concerns
+`uuid.v3/v5/v6` with a caller-supplied buffer; exceljs only calls `uuid.v4`, so it does not apply.
 
 ## Keyboard
 
@@ -58,15 +96,15 @@ and press **R** on the Gateway.
 | F5 / F6 | Payment / Receipt |
 | F4 / F7 | Contra / Journal |
 | Alt+F6 / Alt+F5 | Credit Note / Debit Note |
-| Ctrl+A | Post (voucher entry, bill review, voice confirmation) |
+| Ctrl+A | Post (voucher entry, bill review, all ready document entries, voice confirmation) |
 | F2 | Change date / period |
 | Alt+C | Create a party, ledger or item from any picker |
 | Ctrl+K or Alt+G | Go to any report, voucher type or ledger |
-| Ctrl+U | Upload bills |
+| Ctrl+U | Upload documents (bills, invoices, bank statements, workings) |
 | Ctrl+Space (hold) | Talk (Chrome / Edge speech recognition; English/Hinglish or Tamil) |
 | Alt+A / Alt+X | Alter / reverse the open voucher |
 | Esc | Back |
-| Gateway letters | D Day Book · T Trial Balance · P P&L · B Balance Sheet · A/Y Ageing · L Ledger · S Stock · G GST · M Masters · R Bills |
+| Gateway letters | D Day Book · T Trial Balance · P P&L · B Balance Sheet · A/Y Ageing · L Ledger · S Stock · G GST · M Masters · R Documents |
 
 ## How it is built
 
@@ -103,12 +141,23 @@ AI guardrails (spec sections 3 and 4):
 
 ## Voice languages
 
-Pick the language in the voice panel; the choice is remembered per browser.
+The voice panel is a chat: speak (tap the mic or hold Ctrl+Space) or type, and replies are read aloud
+(▶ on any reply plays it again; 🔊 mutes). After a question it listens for your answer. Pick the
+language at the top of the panel; the choice is remembered per browser.
+
+**Wake word.** Whenever AI is on, the app listens for "Kannaku"; no click needed. Say "Kannaku" and
+your question in one go ("Kannaku, ABC Corp evvalavu baaki?"), or say "Kannaku", wait for the
+chime, and ask. A green dot on the Voice button shows it is listening; untick **Start by saying
+"Kannaku"** in the voice panel to turn it off. The word only counts at the start of a sentence, so
+everyday use of கணக்கு doesn't trigger it. While it is on, the browser's speech service (Google in
+Chrome, Microsoft in Edge) hears the microphone continuously. It works while the Kannaku AI tab is
+open; the browser asks for microphone permission the first time.
 
 | Language | Speech recognition | Readback | Notes |
 | --- | --- | --- | --- |
 | English / Hinglish | en-IN | English | Hindi number words (pachpan sau, dedh lakh) are understood |
 | தமிழ் Tamil | ta-IN | Tamil | Tamil-script and romanised number words (ஐயாயிரத்து ஐநூறு, anju aayiram); confirm with சரி, cancel with வேண்டாம் |
+| Tanglish | ta-IN | Tanglish, spoken by the Indian English voice | Speak Tamil; replies come in Tamil written in English letters ("Endha customer-ku?"), so they are read aloud in any browser. Confirm with sari, cancel with vendam |
 
 Tamil script in what you say switches replies to Tamil even when English is selected. Party and item
 names stay in English in the books; Tamil speech is transliterated to find them, and the model matches
@@ -121,8 +170,9 @@ without it, replies are shown as text. The Tamil message templates are in
 Compared with the spec, this build leaves out:
 
 - **GST filing:** GSTR-1/3B JSON export, GSTR-2B reconciliation, e-invoice / e-way bill (Phase 4).
-- **Multi-tenancy:** user accounts, roles, the desktop app, TDS/TCS (Phase 4).
+- **Roles and invitations:** each company has one owner; inviting accountants, the desktop app, TDS/TCS (Phase 4).
 - **Opening stock entry for items:** record stock through purchases for now.
+- **Old Excel (.xls) and password-protected PDFs** are not read; re-save as .xlsx or remove the password.
 - **Bill reading:** no e-invoice QR decoding and no image pre-processing (deskew, crop); embeddings
   are not used in matching (trigram similarity only).
 - **Voice:** uses the browser's speech recognition and speech synthesis rather than a server STT, and

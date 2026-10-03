@@ -22,7 +22,7 @@ function defaultEntries(t: VoucherType): EntryRow[] {
   return [blankEntry('DR'), blankEntry('CR')];
 }
 
-export function VoucherEntry({ params }: { params?: { type?: VoucherType; input?: VoucherInput; alterOf?: string; alterNo?: string } }) {
+export function VoucherEntry({ params }: { params?: { type?: VoucherType; input?: VoucherInput; alterOf?: string; alterNo?: string; docEntry?: { documentId: string; entryId: string; lineNo: number; note?: string } } }) {
   const app = useApp();
   const { masters, status } = app;
   const init = params?.input;
@@ -142,6 +142,16 @@ export function VoucherEntry({ params }: { params?: { type?: VoucherType; input?
         app.back();
         return;
       }
+      if (params?.docEntry) {
+        // A line from an uploaded document: posting through the document marks the line done and learns from it.
+        const { documentId, entryId, lineNo } = params.docEntry;
+        const { confirmWarnings, ...payload } = input;
+        posted = await api.post<Posted>(c(`/documents/${documentId}/entries/${entryId}/post`), { payload, confirmWarnings });
+        app.toast(`Posted line ${lineNo} as ${TYPE_LABEL[posted.voucherType]} No. ${posted.voucherNo} · ₹${inr(posted.totalMinor)}`);
+        app.bumpData();
+        app.back();
+        return;
+      }
       posted = await api.post<Posted>(c('/vouchers'), input, { 'Idempotency-Key': idem.current });
       app.toast(posted.alreadyPosted ? `Already posted as ${TYPE_LABEL[posted.voucherType]} ${posted.voucherNo}` : `Posted ${TYPE_LABEL[posted.voucherType]} No. ${posted.voucherNo} · ₹${inr(posted.totalMinor)}`);
       app.bumpData();
@@ -226,6 +236,7 @@ export function VoucherEntry({ params }: { params?: { type?: VoucherType; input?
           ))}
         </div>
       </ScreenHead>
+      {params?.docEntry && <div className="warn small">From an uploaded document, line {params.docEntry.lineNo}. Posting here completes that line.{params.docEntry.note ? ` ${params.docEntry.note}` : ''}</div>}
 
       <div className="voucher-body">
         <div className="voucher-main">

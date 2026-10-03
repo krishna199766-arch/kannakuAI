@@ -37,6 +37,10 @@ interface AppState {
   toast: (msg: string, kind?: 'ok' | 'error' | 'info') => void;
   dataVersion: number;
   bumpData: () => void;
+  refreshStatus: () => Promise<void>;
+  /** The API key dialog (top bar AI chip, and the "AI is off" notices). */
+  aiKeyOpen: boolean;
+  setAiKeyOpen: (open: boolean) => void;
 }
 
 const Ctx = createContext<AppState | null>(null);
@@ -61,6 +65,7 @@ export function AppProvider({ children }: { children: (toasts: { id: number; msg
   const [toasts, setToasts] = useState<{ id: number; msg: string; kind: string }[]>([]);
   const [dataVersion, setDataVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [aiKeyOpen, setAiKeyOpen] = useState(false);
 
   const toast = useCallback((msg: string, kind: 'ok' | 'error' | 'info' = 'ok') => {
     const id = Date.now() + Math.random();
@@ -140,7 +145,9 @@ export function AppProvider({ children }: { children: (toasts: { id: number; msg
     toast,
     dataVersion,
     bumpData: () => { setDataVersion((v) => v + 1); void refreshMasters(); },
-  } : null), [status, user, company, companies, reloadCompanies, logout, masters, refreshMasters, refreshCompany, stack, toast, dataVersion]);
+    refreshStatus: async () => { setStatus(await api.get<Status>('/api/v1/status')); },
+    aiKeyOpen, setAiKeyOpen,
+  } : null), [status, user, company, companies, reloadCompanies, logout, masters, refreshMasters, refreshCompany, stack, toast, dataVersion, aiKeyOpen]);
 
   if (error) return <div className="boot-error"><h1>Kannaku AI could not start</h1><p>{error}</p><p>Is the server running? Start it with <code>npm start</code> in the project folder.</p></div>;
   if (!status || !authChecked) return <div className="boot">Loading…</div>;

@@ -34,6 +34,8 @@ export const api = {
   get: <T>(url: string) => request<T>('GET', url),
   post: <T>(url: string, body?: unknown, headers?: Record<string, string>) => request<T>('POST', url, body, headers),
   patch: <T>(url: string, body?: unknown) => request<T>('PATCH', url, body),
+  put: <T>(url: string, body?: unknown) => request<T>('PUT', url, body),
+  delete: <T>(url: string) => request<T>('DELETE', url),
 };
 
 let companyId = '';
@@ -42,7 +44,7 @@ export const c = (path: string) => `/api/v1/companies/${companyId}${path}`;
 
 export interface Status { app: string; aiEnabled: boolean; model: string; today: string; states: Record<string, string>; hasUsers: boolean; unclaimed: string[] }
 export interface User { id: string; email: string; name: string; phone: string | null }
-export interface Company { id: string; name: string; gstin: string | null; stateCode: string; booksFrom: string; lockDate: string | null; fyStartMonth: number; voiceLimitMinor: string; roundInvoice: boolean; role: string }
+export interface Company { id: string; name: string; gstin: string | null; stateCode: string; booksFrom: string; lockDate: string | null; fyStartMonth: number; voiceLimitMinor: string; roundInvoice: boolean; role: string; autoPost?: boolean; autoPostLimitMinor?: string }
 export interface Ledger { id: string; name: string; groupName: string; groupId: string; path: string; nature: string; systemCode: string | null; counterpartyId: string | null; billWise: boolean; taxComponent: string | null; isCashBank: boolean; balanceMinor: string }
 export interface Party { id: string; name: string; gstin: string | null; stateCode: string | null; city: string | null; phone: string | null; creditDays: number | null; status: string; ledgerId: string; groupName: string; kind: 'CUSTOMER' | 'SUPPLIER' | 'OTHER'; balanceMinor: string }
 export interface Item { id: string; name: string; hsnSac: string | null; gstRatePpm: number | null; valuation: string; uom: string; uomId: string; qtyOnHand: string }

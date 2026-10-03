@@ -17,7 +17,7 @@ if (companies.rows[0].n === 0n && process.env.LEDGERAI_DEMO === '1') {
 const app = await buildApp(db, { serveWeb: true });
 await resumePending(db);
 await app.listen({ port: config.port, host: '127.0.0.1' });
-console.log(`Kannaku AI on http://127.0.0.1:${config.port}  (AI ${config.aiEnabled ? `on, model ${config.model}` : 'off: set ANTHROPIC_API_KEY in .env'})`);
+console.log(`Kannaku AI on http://127.0.0.1:${config.port}  (AI ${config.aiEnabled ? `on, model ${config.model}` : 'off: click "AI off" in the app to add an API key'})`);
 
 const shutdown = async () => { await app.close(); await db.close(); process.exit(0); };
 // Close the embedded database cleanly on Ctrl+C, Ctrl+Break and when the terminal window is closed

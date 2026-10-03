@@ -4,9 +4,10 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT_DIR = path.resolve(here, '..', '..');
 
-// Load .env from the repo root if present (Node >= 21).
+// Load .env from the repo root if present (Node >= 21). The app writes the API key here too.
+const envFile = path.resolve(ROOT_DIR, process.env.ENV_FILE ?? '.env');
 try {
-  process.loadEnvFile(path.join(ROOT_DIR, '.env'));
+  process.loadEnvFile(envFile);
 } catch {
   /* no .env file — fine */
 }
@@ -16,6 +17,7 @@ const dataDir = path.resolve(ROOT_DIR, process.env.DATA_DIR ?? 'data');
 export const config = {
   port: Number(process.env.PORT ?? 4000),
   dataDir,
+  envFile,
   dbDir: path.join(dataDir, 'pg'),
   uploadDir: path.join(dataDir, 'uploads'),
   webDist: path.join(ROOT_DIR, 'web', 'dist'),

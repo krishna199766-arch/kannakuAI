@@ -14,11 +14,13 @@ import { ageing, daybook, ledgerStatement, openBills, voucherDetail } from '../r
 import { gstSummary } from '../reports/gst';
 import { dashboard } from '../reports/dashboard';
 import { stockAsOf } from '../inventory/stock';
-import { acceptDocument, documentFilePath, enqueue, ingestDocument, rejectDocument } from '../ai/documents';
+import { acceptDocument, documentFilePath, ingestDocument, rejectDocument, reprocessDocument, type DocOptions } from '../ai/documents';
+import { listEntries, postEntry, postReady, setSkipped, updateEntry } from '../ai/intake/entries';
 import { resolveParty } from '../ai/resolver';
 import { cancelSession, confirmSession, handleUtterance } from '../ai/voice/engine';
 import { asLang } from '../ai/voice/i18n';
 import { requireUser } from '../auth/routes';
+import { aiKeyStatus, removeAiKey, setAiKey } from '../ai/key';
 
 type Req = FastifyRequest<{ Params: Record<string, string>; Querystring: Record<string, string | undefined>; Body: any }>;
 
@@ -45,6 +47,17 @@ export function registerRoutes(app: FastifyInstance, db: PGlite) {
     return c;
   }
 
+  // ---------- AI key (whole installation; company owners only) ----------
+  const requireOwner = async (req: Req) => {
+    const user = requireUser(req);
+    if (!await maybeOne(db, `SELECT 1 FROM company_members WHERE user_id = $1 AND role = 'OWNER'`, [user.id])) {
+      throw new AppError('FORBIDDEN', 403, 'Only a company owner can change the AI key.');
+    }
+  };
+  app.get('/api/v1/settings/ai-key', async (req: Req) => { requireUser(req); return aiKeyStatus(); });
+  app.put('/api/v1/settings/ai-key', async (req: Req) => { await requireOwner(req); return setAiKey(body(req).apiKey); });
+  app.delete('/api/v1/settings/ai-key', async (req: Req) => { await requireOwner(req); return removeAiKey(); });
+
   app.get('/api/v1/status', async () => {
     const hasUsers = Boolean(await maybeOne(db, 'SELECT 1 FROM users LIMIT 1'));
     return {
@@ -60,6 +73,8 @@ export function registerRoutes(app: FastifyInstance, db: PGlite) {
     if (b.lockDate !== undefined) await db.query(`UPDATE companies SET lock_date = $2 WHERE id = $1`, [c.id, b.lockDate || null]);
     if (b.voiceLimit !== undefined) await db.query(`UPDATE companies SET voice_limit_minor = $2 WHERE id = $1`, [c.id, toMinor(b.voiceLimit)]);
     if (b.roundInvoice !== undefined) await db.query(`UPDATE companies SET round_invoice = $2 WHERE id = $1`, [c.id, Boolean(b.roundInvoice)]);
+    if (b.autoPost !== undefined) await db.query(`UPDATE companies SET auto_post = $2 WHERE id = $1`, [c.id, Boolean(b.autoPost)]);
+    if (b.autoPostLimit !== undefined) await db.query(`UPDATE companies SET auto_post_limit_minor = $2 WHERE id = $1`, [c.id, toMinor(b.autoPostLimit)]);
     if (b.gstin !== undefined) {
       if (b.gstin && !isValidGstin(b.gstin)) throw invalid('GSTIN is not valid');
       await db.query(`UPDATE companies SET gstin = $2 WHERE id = $1`, [c.id, b.gstin || null]);
@@ -179,14 +194,23 @@ export function registerRoutes(app: FastifyInstance, db: PGlite) {
   });
   app.get(`${P}/audit/verify-chain`, async (req: Req) => verifyChain(db, (await company(req)).id));
 
-  // ---------- Bill scanning ----------
+  // ---------- Documents: bills, invoices, bank statements, workings, registers ----------
+  const docOptions = (raw: Record<string, unknown>): DocOptions => ({
+    docType: (typeof raw.docType === 'string' && raw.docType && raw.docType !== 'AUTO' ? raw.docType : null) as DocOptions['docType'],
+    bankLedgerId: typeof raw.bankLedgerId === 'string' && raw.bankLedgerId ? raw.bankLedgerId : null,
+    registerKind: raw.registerKind === 'SALES' || raw.registerKind === 'PURCHASE' ? raw.registerKind : null,
+    date: typeof raw.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.date) ? raw.date : null,
+  });
   app.post(`${P}/documents`, async (req: Req) => {
     const c = await company(req);
     const results: unknown[] = [];
-    for await (const part of req.files()) {
+    const fields: Record<string, unknown> = {};
+    // Form fields (document type, bank account) come before the files they apply to.
+    for await (const part of req.parts()) {
+      if (part.type === 'field') { fields[part.fieldname] = part.value; continue; }
       const data = await part.toBuffer();
       try {
-        results.push({ fileName: part.filename, ...(await ingestDocument(db, c.id, { name: part.filename, mime: part.mimetype, data }, uid(req))) });
+        results.push({ fileName: part.filename, ...(await ingestDocument(db, c.id, { name: part.filename, mime: part.mimetype, data }, uid(req), docOptions(fields))) });
       } catch (e) {
         if (e instanceof AppError) results.push({ fileName: part.filename, error: { code: e.code, message: e.message, details: e.details } });
         else throw e;
@@ -195,7 +219,9 @@ export function registerRoutes(app: FastifyInstance, db: PGlite) {
     return results;
   });
   app.get(`${P}/documents`, async (req: Req) => many(db,
-    `SELECT d.id, d.file_name AS "fileName", d.mime, d.status, d.error, d.created_at AS "createdAt", d.voucher_id AS "voucherId",
+    `SELECT d.id, d.file_name AS "fileName", d.mime, d.status, d.error, d.created_at AS "createdAt", d.voucher_id AS "voucherId", d.doc_type AS "docType",
+            d.summary->>'bankLedgerName' AS "bankLedgerName",
+            (SELECT jsonb_object_agg(status, n) FROM (SELECT status, COUNT(*)::int AS n FROM document_entries e WHERE e.document_id = d.id GROUP BY status) s) AS counts,
             d.extraction->'supplier'->'name'->>'value' AS supplier, d.extraction->'invoice_number'->>'value' AS "invoiceNo",
             d.extraction->'totals'->'grand_total'->>'value' AS "grandTotal",
             (SELECT COUNT(*) FROM jsonb_array_elements(COALESCE(d.validation, '[]'::jsonb)) x WHERE x->>'severity' = 'error')::int AS errors
@@ -204,10 +230,11 @@ export function registerRoutes(app: FastifyInstance, db: PGlite) {
     const c = await company(req);
     const d = await maybeOne<Record<string, unknown>>(db,
       `SELECT d.id, d.file_name AS "fileName", d.mime, d.status, d.error, d.extraction, d.validation, d.matches,
-              d.voucher_id AS "voucherId", d.model, d.prompt_version AS "promptVersion", vd.payload AS draft
+              d.voucher_id AS "voucherId", d.model, d.prompt_version AS "promptVersion", vd.payload AS draft,
+              d.doc_type AS "docType", d.summary, d.options, d.bank_ledger_id AS "bankLedgerId"
          FROM documents d LEFT JOIN voucher_drafts vd ON vd.id = d.draft_id WHERE d.id = $1 AND d.company_id = $2`, [req.params.id, c.id]);
     if (!d) throw notFound('Document');
-    return d;
+    return { ...d, entries: await listEntries(db, c.id, req.params.id) };
   });
   app.get(`${P}/documents/:id/file`, async (req: Req, reply) => {
     const c = await company(req);
@@ -215,15 +242,27 @@ export function registerRoutes(app: FastifyInstance, db: PGlite) {
     if (!d) throw notFound('Document');
     reply.header('Content-Type', d.mime);
     reply.header('Cache-Control', 'private, max-age=3600');
+    // Spreadsheets download; PDFs and images show inline. nosniff stops a crafted upload being run as a page.
+    reply.header('X-Content-Type-Options', 'nosniff');
+    if (!/^(application\/pdf|image\/(jpeg|png|webp|gif))$/.test(d.mime)) reply.header('Content-Disposition', 'attachment');
     return reply.send(fs.createReadStream(documentFilePath(d.storage_key)));
   });
   app.post(`${P}/documents/:id/accept`, async (req: Req) => acceptDocument(db, (await company(req)).id, req.params.id, body(req), uid(req)));
   app.post(`${P}/documents/:id/reject`, async (req: Req) => { await rejectDocument(db, (await company(req)).id, req.params.id); return { ok: true }; });
   app.post(`${P}/documents/:id/retry`, async (req: Req) => {
-    await company(req);
-    enqueue(db, req.params.id);
+    const c = await company(req);
+    await reprocessDocument(db, c.id, req.params.id, docOptions(body(req)));
     return { ok: true };
   });
+  // Entries of multi-entry documents (statement lines, journals, register rows).
+  const E = `${P}/documents/:id/entries/:eid`;
+  app.put(E, async (req: Req) => updateEntry(db, (await company(req)).id, req.params.id, req.params.eid, body(req).payload));
+  app.post(`${E}/post`, async (req: Req) => {
+    const b = body(req);
+    return postEntry(db, (await company(req)).id, req.params.id, req.params.eid, uid(req), { payload: b.payload ?? undefined, confirmWarnings: Boolean(b.confirmWarnings) });
+  });
+  app.post(`${E}/skip`, async (req: Req) => { await setSkipped(db, (await company(req)).id, req.params.id, req.params.eid, body(req).skip !== false); return { ok: true }; });
+  app.post(`${P}/documents/:id/post-ready`, async (req: Req) => postReady(db, (await company(req)).id, req.params.id, uid(req)));
 
   // ---------- Voice ----------
   app.post(`${P}/voice/utterance`, async (req: Req) => {

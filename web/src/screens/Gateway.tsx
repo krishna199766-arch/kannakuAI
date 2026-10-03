@@ -15,7 +15,7 @@ interface Dash {
 export const MENU: { key: string; label: string; route: Route; group: string }[] = [
   { key: 'V', label: 'Vouchers (enter)', route: { screen: 'voucher', params: { type: 'SALES' } }, group: 'Transactions' },
   { key: 'D', label: 'Day Book', route: { screen: 'daybook' }, group: 'Transactions' },
-  { key: 'R', label: 'Review scanned bills', route: { screen: 'review' }, group: 'Transactions' },
+  { key: 'R', label: 'Documents (bills, statements, workings)', route: { screen: 'review' }, group: 'Transactions' },
   { key: 'M', label: 'Masters', route: { screen: 'masters' }, group: 'Masters' },
   { key: 'T', label: 'Trial Balance', route: { screen: 'tb' }, group: 'Reports' },
   { key: 'P', label: 'Profit & Loss', route: { screen: 'pl' }, group: 'Reports' },
@@ -75,7 +75,7 @@ export function Gateway() {
         <section className="recent">
           <h2>Recent vouchers</h2>
           {d && d.recent.length === 0 && (
-            <div className="empty-state">No entries yet. Press <Kbd>F8</Kbd> to record your first sale, <Kbd>M</Kbd> to add parties and items, or <Kbd>Ctrl+U</Kbd> to scan a bill.</div>
+            <div className="empty-state">No entries yet. Press <Kbd>F8</Kbd> to record your first sale, <Kbd>M</Kbd> to add parties and items, or <Kbd>Ctrl+U</Kbd> to upload a bill, bank statement or workings.</div>
           )}
           {(!d || d.recent.length > 0) && <table className="list">
             <thead><tr><th>Date</th><th>Type</th><th>No.</th><th>Particulars</th><th className="num">Amount</th><th>Via</th></tr></thead>
@@ -92,7 +92,7 @@ export function Gateway() {
           <div className="quick">
             <h3>Quick entry</h3>
             <p><Kbd>F8</Kbd> Sales <Kbd>F9</Kbd> Purchase <Kbd>F5</Kbd> Payment <Kbd>F6</Kbd> Receipt <Kbd>F4</Kbd> Contra <Kbd>F7</Kbd> Journal</p>
-            <p><Kbd>Ctrl+U</Kbd> Scan bills · hold <Kbd>Ctrl+Space</Kbd> to speak · <Kbd>Ctrl+K</Kbd> Go to anything</p>
+            <p><Kbd>Ctrl+U</Kbd> Upload bills, statements, workings · hold <Kbd>Ctrl+Space</Kbd> to speak · <Kbd>Ctrl+K</Kbd> Go to anything</p>
           </div>
         </section>
       </div>

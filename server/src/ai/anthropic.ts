@@ -9,9 +9,12 @@ const PROMPTS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'prompts
 
 let client: Anthropic | null = null;
 
+/** Drops the cached client so a key set from the app is used for the next call. */
+export function resetClient() { client = null; }
+
 export function claude(): Anthropic {
   if (!config.aiEnabled) {
-    throw new AppError('AI_DISABLED', 503, 'AI features need ANTHROPIC_API_KEY. Add it to .env in the project root and restart.');
+    throw new AppError('AI_DISABLED', 503, 'AI is off. Click "AI off" in the top bar and enter your Anthropic API key.');
   }
   client ??= new Anthropic();
   return client;
@@ -37,7 +40,7 @@ export class ModelStopped extends AppError {
 export function wrapApiError(e: unknown): never {
   if (e instanceof AppError) throw e;
   if (e instanceof Anthropic.RateLimitError) throw new AppError('AI_RATE_LIMITED', 429, 'The AI service is rate limiting requests. Try again in a moment.');
-  if (e instanceof Anthropic.AuthenticationError) throw new AppError('AI_AUTH', 503, 'The ANTHROPIC_API_KEY was rejected.');
+  if (e instanceof Anthropic.AuthenticationError) throw new AppError('AI_AUTH', 503, 'Anthropic rejected the API key. Click "AI on" in the top bar to enter a new one.');
   if (e instanceof Anthropic.APIConnectionError) throw new AppError('AI_UNREACHABLE', 503, 'Could not reach the AI service.');
   if (e instanceof Anthropic.APIError) throw new AppError('AI_ERROR', 502, `AI service error: ${e.message}`);
   throw e;

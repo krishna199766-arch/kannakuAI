@@ -108,11 +108,13 @@ export function Settings() {
   const [voiceLimit, setVoiceLimit] = useState(inr(co.voiceLimitMinor).replace(/,/g, ''));
   const [roundInvoice, setRoundInvoice] = useState(co.roundInvoice);
   const [gstin, setGstin] = useState(co.gstin ?? '');
+  const [autoPost, setAutoPost] = useState(Boolean(co.autoPost));
+  const [autoPostLimit, setAutoPostLimit] = useState(inr(co.autoPostLimitMinor ?? '5000000').replace(/,/g, ''));
   const [chain, setChain] = useState<{ ok: boolean; checked: number; head?: string; brokenAt?: { voucherNo: string } } | null>(null);
   const [err, setErr] = useState<{ message: string } | null>(null);
   const save = async () => {
     try {
-      await api.patch(c(''), { lockDate: lockDate || null, voiceLimit, roundInvoice, gstin: gstin || null });
+      await api.patch(c(''), { lockDate: lockDate || null, voiceLimit, roundInvoice, gstin: gstin || null, autoPost, autoPostLimit });
       await app.refreshCompany();
       app.toast('Settings saved');
       setErr(null);
@@ -126,6 +128,8 @@ export function Settings() {
         <label>Lock books up to (no posting on or before)<input type="date" value={lockDate} onChange={(e) => setLockDate(e.target.value)} /></label>
         <label>Voice posting limit (₹) — above this, Ctrl+A is required<input value={voiceLimit} onChange={(e) => setVoiceLimit(e.target.value)} inputMode="decimal" /></label>
         <label className="check"><input type="checkbox" checked={roundInvoice} onChange={(e) => setRoundInvoice(e.target.checked)} /> Round invoice totals to the rupee</label>
+        <label className="check"><input type="checkbox" checked={autoPost} onChange={(e) => setAutoPost(e.target.checked)} /> Auto-post uploaded documents: entries that pass every check are posted without waiting for you</label>
+        {autoPost && <label>Auto-post only up to (₹ per entry) — larger ones wait for Ctrl+A<input value={autoPostLimit} onChange={(e) => setAutoPostLimit(e.target.value)} inputMode="decimal" /></label>}
         <ErrorBox error={err} />
         <div className="form-actions"><button className="primary" type="submit">Save</button></div>
       </form>
@@ -136,7 +140,8 @@ export function Settings() {
         ? <p className="ok">Intact: {chain.checked} vouchers verified. Head <code>{chain.head?.slice(0, 24)}…</code></p>
         : <p className="bad">Broken at voucher {chain.brokenAt?.voucherNo}. The books were modified outside the posting engine.</p>)}
       <h3>AI</h3>
-      <p>{app.status.aiEnabled ? `Bill scanning and voice are on (model ${app.status.model}).` : 'Bill scanning and voice are off. Add ANTHROPIC_API_KEY to the .env file in the project folder and restart the server.'}</p>
+      <p>{app.status.aiEnabled ? `Bill reading and voice are on (model ${app.status.model}).` : 'Bill reading from PDFs and photos, and voice, are off.'}</p>
+      <button onClick={() => app.setAiKeyOpen(true)}>{app.status.aiEnabled ? 'Manage API key' : 'Enter API key'}</button>
     </div>
   );
 }

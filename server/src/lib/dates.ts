@@ -84,6 +84,11 @@ export function resolvePeriod(p: PeriodName, today: string, fyStartMonth = 4): {
 }
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+/** "18 Sep 2026", for messages people read. */
+export function shortDate(iso: string): string {
+  return `${Number(iso.slice(8, 10))} ${MONTHS[Number(iso.slice(5, 7)) - 1].slice(0, 3)} ${iso.slice(0, 4)}`;
+}
+
 export function speakDate(iso: string): string {
   return `${Number(iso.slice(8, 10))} ${MONTHS[Number(iso.slice(5, 7)) - 1]}`;
 }

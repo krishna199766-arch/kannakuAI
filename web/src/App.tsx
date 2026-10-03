@@ -10,10 +10,11 @@ import { Daybook } from './screens/Daybook';
 import { VoucherView } from './screens/VoucherView';
 import { Ageing, BalanceSheet, GstSummary, LedgerStatement, ProfitLoss, StockSummary, TrialBalance } from './screens/Reports';
 import { Masters, Settings } from './screens/Masters';
-import { ReviewDoc, ReviewQueue } from './screens/Review';
+import { DocumentScreen, DocumentsQueue } from './screens/Documents';
 import { fmtDate } from './format';
 import { Modal } from './components/ui';
 import { CompanyForm } from './components/CompanyForm';
+import { AiKeyDialog } from './components/AiKey';
 
 const VOUCHER_KEYS: Record<string, string> = { F4: 'CONTRA', F5: 'PAYMENT', F6: 'RECEIPT', F7: 'JOURNAL', F8: 'SALES', F9: 'PURCHASE', 'Alt+F6': 'CREDIT_NOTE', 'Alt+F5': 'DEBIT_NOTE' };
 
@@ -31,8 +32,8 @@ function Screen({ route }: { route: Route }) {
     case 'stock': return <StockSummary />;
     case 'gst': return <GstSummary />;
     case 'masters': return <Masters />;
-    case 'review': return <ReviewQueue params={p} />;
-    case 'review-doc': return <ReviewDoc params={p as { id: string }} />;
+    case 'review': return <DocumentsQueue params={p} />;
+    case 'review-doc': return <DocumentScreen params={p as { id: string }} />;
     case 'settings': return <Settings />;
     default: return <Gateway />;
   }
@@ -42,6 +43,7 @@ function Shell({ toasts }: { toasts: { id: number; msg: string; kind: string }[]
   const app = useApp();
   const [palette, setPalette] = useState(false);
   const [voice, setVoice] = useState(false);
+  const [wake, setWake] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { dispatchKey(e); };
@@ -68,8 +70,10 @@ function Shell({ toasts }: { toasts: { id: number; msg: string; kind: string }[]
         <CompanySwitcher />
         <div className="top-actions">
           <button onClick={() => setPalette(true)}>Go to <Kbd>Ctrl+K</Kbd></button>
-          <button className={voice ? 'on' : ''} onClick={() => setVoice((v) => !v)} title="Hold Ctrl+Space to talk">Voice <Kbd>Ctrl+Space</Kbd></button>
-          <span className={`ai-chip ${app.status.aiEnabled ? 'on' : 'off'}`} title={app.status.aiEnabled ? `Model ${app.status.model}` : 'Set ANTHROPIC_API_KEY to enable'}>AI {app.status.aiEnabled ? 'on' : 'off'}</span>
+          <button className={`voice-btn ${voice ? 'on' : ''}`} onClick={() => setVoice((v) => !v)}
+            title={wake ? 'Listening for “Kannaku”. Hold Ctrl+Space to talk' : 'Hold Ctrl+Space to talk'}>{wake && <span className="wake-dot on" aria-label="Listening for Kannaku" />}Voice <Kbd>Ctrl+Space</Kbd></button>
+          <button className={`ai-chip ${app.status.aiEnabled ? 'on' : 'off'}`} onClick={() => app.setAiKeyOpen(true)}
+            title={app.status.aiEnabled ? `AI on, model ${app.status.model}. Click to manage the API key` : 'Click to enter your Anthropic API key'}>AI {app.status.aiEnabled ? 'on' : 'off'}</button>
           <UserMenu />
         </div>
       </header>
@@ -81,11 +85,12 @@ function Shell({ toasts }: { toasts: { id: number; msg: string; kind: string }[]
       <footer className="keybar" aria-label="Keyboard shortcuts">
         {app.stackDepth > 1 && <span><Kbd>Esc</Kbd> Back</span>}
         <span><Kbd>F8</Kbd> Sales</span><span><Kbd>F9</Kbd> Purchase</span><span><Kbd>F5</Kbd> Payment</span><span><Kbd>F6</Kbd> Receipt</span>
-        <span><Kbd>F4</Kbd> Contra</span><span><Kbd>F7</Kbd> Journal</span><span><Kbd>Ctrl+U</Kbd> Scan bill</span><span><Kbd>Alt+H</Kbd> Home</span>
+        <span><Kbd>F4</Kbd> Contra</span><span><Kbd>F7</Kbd> Journal</span><span><Kbd>Ctrl+U</Kbd> Upload documents</span><span><Kbd>Alt+H</Kbd> Home</span>
       </footer>
 
       {palette && <Palette onClose={() => setPalette(false)} />}
-      <VoicePanel open={voice} onOpen={() => setVoice(true)} onClose={() => setVoice(false)} />
+      {app.aiKeyOpen && <AiKeyDialog onClose={() => app.setAiKeyOpen(false)} />}
+      <VoicePanel open={voice} onOpen={() => setVoice(true)} onClose={() => setVoice(false)} onWakeChange={setWake} />
       <div className="toasts" aria-live="polite">{toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.msg}</div>)}</div>
     </div>
   );

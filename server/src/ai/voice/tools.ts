@@ -1,23 +1,26 @@
 import type Anthropic from '@anthropic-ai/sdk';
 
-/** Strict tool schemas (spec 4.3). Deliberately no debit/credit field anywhere. */
+/**
+ * Strict tool schemas (spec 4.3). Deliberately no debit/credit field anywhere.
+ *
+ * No nullable fields: the API allows only 16 union-typed fields across all strict tools in a request.
+ * "Not said" is an empty string (or NOT_SAID), and normalizeToolInput() turns it back into null.
+ */
 
-const nullable = (schema: Record<string, unknown>) => ({ anyOf: [schema, { type: 'null' }] });
-
-const entity = (description: string) => nullable({
+const entity = (description: string) => ({
   type: 'object',
-  description,
+  description: `${description}. Both fields "" if the user did not mention one`,
   additionalProperties: false,
   required: ['candidate_id', 'spoken'],
   properties: {
-    candidate_id: { type: ['string', 'null'], description: 'A key from <candidates> (e.g. "p1"), or null if none clearly fits' },
+    candidate_id: { type: 'string', description: 'A key from <candidates> (e.g. "p1"), or "" if none clearly fits' },
     spoken: { type: 'string', description: 'The words the user used for it' },
   },
 });
 
-const spokenNumber = (description: string) => nullable({
+const spokenNumber = (description: string) => ({
   type: 'object',
-  description,
+  description: `${description}. Both fields "" if the user did not say it`,
   additionalProperties: false,
   required: ['value', 'spoken'],
   properties: {
@@ -25,6 +28,8 @@ const spokenNumber = (description: string) => nullable({
     spoken: { type: 'string', description: 'Exact transcript words that state this number' },
   },
 });
+
+const text = (description: string) => ({ type: 'string', description: `${description}; "" if not said` });
 
 const PERIODS = ['TODAY', 'YESTERDAY', 'THIS_WEEK', 'THIS_MONTH', 'LAST_MONTH', 'THIS_QUARTER', 'LAST_QUARTER', 'THIS_FY', 'LAST_FY', 'AS_OF_TODAY'];
 
@@ -36,10 +41,10 @@ export const VOICE_TOOLS: Anthropic.Beta.BetaTool[] = [
     input_schema: {
       type: 'object',
       additionalProperties: false,
-      required: ['voucher_type', 'date', 'party', 'payment_mode', 'items', 'other_ledger', 'amount', 'amount_includes_tax', 'gst_rate_percent', 'narration', 'missing'],
+      required: ['voucher_type', 'date', 'party', 'payment_mode', 'items', 'other_ledger', 'amount', 'amount_includes_tax', 'gst_rate_percent', 'bill_no', 'narration', 'missing'],
       properties: {
         voucher_type: { type: 'string', enum: ['SALES', 'PURCHASE', 'PAYMENT', 'RECEIPT', 'CONTRA', 'JOURNAL', 'CREDIT_NOTE', 'DEBIT_NOTE'] },
-        date: { type: ['string', 'null'], description: 'YYYY-MM-DD only if the user said a date; null = today' },
+        date: text('YYYY-MM-DD only if the user said a date ("" = today)'),
         party: entity('Customer or supplier'),
         payment_mode: { type: 'string', enum: ['CASH', 'BANK', 'CREDIT', 'UNSPECIFIED'] },
         items: {
@@ -51,16 +56,17 @@ export const VOICE_TOOLS: Anthropic.Beta.BetaTool[] = [
             properties: {
               entity: entity('Stock item'),
               quantity: spokenNumber('Quantity'),
-              unit: { type: ['string', 'null'] },
+              unit: text('Unit as said'),
               rate: spokenNumber('Price per unit'),
             },
           },
         },
         other_ledger: entity('Expense, income or bank ledger for payments, receipts and contra'),
         amount: spokenNumber('Total amount the user stated'),
-        amount_includes_tax: { type: ['boolean', 'null'] },
-        gst_rate_percent: { type: ['string', 'null'] },
-        narration: { type: ['string', 'null'] },
+        amount_includes_tax: { type: 'string', enum: ['YES', 'NO', 'NOT_SAID'] },
+        gst_rate_percent: text('GST rate as said, e.g. "18"'),
+        bill_no: text("The supplier's bill or invoice number, for purchases"),
+        narration: text('Note to keep with the voucher'),
         missing: { type: 'array', items: { type: 'string' }, description: 'Required fields the user did not say' },
       },
     },
@@ -119,7 +125,7 @@ export const VOICE_TOOLS: Anthropic.Beta.BetaTool[] = [
       required: ['voucher_type', 'voucher_no'],
       properties: {
         voucher_type: { type: 'string', enum: ['SALES', 'PURCHASE', 'PAYMENT', 'RECEIPT', 'CONTRA', 'JOURNAL', 'CREDIT_NOTE', 'DEBIT_NOTE'] },
-        voucher_no: { type: ['string', 'null'], description: 'Voucher number if said; null means the most recent one' },
+        voucher_no: text('Voucher number if said ("" = the most recent one)'),
       },
     },
   },
@@ -136,6 +142,24 @@ export const VOICE_TOOLS: Anthropic.Beta.BetaTool[] = [
   },
 ];
 
+const TEXT_FIELDS = new Set(['date', 'unit', 'gst_rate_percent', 'bill_no', 'narration', 'voucher_no']);
+
+/** Tool input as the model sends it -> the app's shape, where anything not said is null. Nulls pass through. */
+export function normalizeToolInput(value: unknown, key = ''): unknown {
+  if (Array.isArray(value)) return value.map((v) => normalizeToolInput(v));
+  if (value && typeof value === 'object') {
+    const o = value as Record<string, unknown>;
+    if ('spoken' in o && 'candidate_id' in o) {
+      return !o.spoken && !o.candidate_id ? null : { candidate_id: o.candidate_id || null, spoken: String(o.spoken ?? '') };
+    }
+    if ('spoken' in o && 'value' in o) return o.value ? { value: o.value, spoken: String(o.spoken ?? '') } : null;
+    return Object.fromEntries(Object.entries(o).map(([k, v]) => [k, normalizeToolInput(v, k)]));
+  }
+  if (key === 'amount_includes_tax' && typeof value === 'string') return value === 'YES' ? true : value === 'NO' ? false : null;
+  if (TEXT_FIELDS.has(key) && value === '') return null;
+  return value;
+}
+
 export interface EntityRef { candidate_id: string | null; spoken: string }
 export interface SpokenNumber { value: string; spoken: string }
 export interface RecordVoucherCall {
@@ -148,6 +172,8 @@ export interface RecordVoucherCall {
   amount: SpokenNumber | null;
   amount_includes_tax: boolean | null;
   gst_rate_percent: string | null;
+  /** Supplier's bill number (purchases); older sessions may not have it. */
+  bill_no?: string | null;
   narration: string | null;
   missing: string[];
 }

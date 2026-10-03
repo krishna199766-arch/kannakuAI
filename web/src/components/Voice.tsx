@@ -5,34 +5,65 @@ import { useKeys } from '../keys';
 import { Kbd } from './ui';
 import { inr } from '../format';
 
-type VLang = 'en' | 'ta';
+type VLang = 'en' | 'ta' | 'tanglish';
 
 /** Speech-recognition and speech-synthesis locales, plus example commands, per voice language. */
-const LANGS: Record<VLang, { label: string; stt: string; tts: string; examples: string[]; typeHint: string; noVoice: string }> = {
+const LANGS: Record<VLang, { label: string; short: string; stt: string; tts: string; examples: string[]; typeHint: string; yes: string; no: string }> = {
   en: {
-    label: 'English / Hinglish', stt: 'en-IN', tts: 'en-IN',
+    label: 'English / Hinglish', short: 'English', stt: 'en-IN', tts: 'en-IN',
     examples: [
-      'Record a cash sale of 5,500 rupees to Rajesh Traders for 10 bags of cement including 18% GST',
-      'What is the outstanding receivable from ABC Corp this quarter?',
-      'Show me the daybook for yesterday',
+      'Cash sale of 5,500 rupees to Rajesh Traders for 10 bags of cement including 18% GST',
+      'How much does ABC Corp owe this quarter?',
+      'Show yesterday’s day book',
     ],
-    typeHint: '…or type a command',
-    noVoice: '',
+    typeHint: 'Type or tap the mic…', yes: 'Confirm', no: 'Cancel',
   },
   ta: {
-    label: 'தமிழ் (Tamil)', stt: 'ta-IN', tts: 'ta-IN',
+    label: 'தமிழ் (Tamil)', short: 'தமிழ்', stt: 'ta-IN', tts: 'ta-IN',
     examples: [
       'ராஜேஷ் டிரேடர்ஸ்-க்கு பத்து மூட்டை சிமெண்ட் ரொக்க விற்பனை, ஐயாயிரத்து ஐநூறு ரூபாய், 18% ஜிஎஸ்டி சேர்த்து',
       'ABC Corp இந்த காலாண்டு எவ்வளவு பாக்கி?',
       'நேற்றைய நாள் புத்தகத்தைக் காட்டு',
     ],
-    typeHint: '…அல்லது இங்கே தட்டச்சு செய்யுங்கள்',
-    noVoice: 'This browser has no Tamil voice, so replies are shown but not spoken. Microsoft Edge includes Tamil voices.',
+    typeHint: 'தட்டச்சு செய்யுங்கள் அல்லது மைக்கை அழுத்துங்கள்…',
+    yes: 'சரி', no: 'வேண்டாம்',
+  },
+  tanglish: {
+    // Listens in Tamil; replies in Tamil written in English letters, spoken by the Indian English voice.
+    label: 'Tanglish (Tamil + English)', short: 'Tanglish', stt: 'ta-IN', tts: 'en-IN',
+    examples: [
+      'Rajesh Traders-ku 10 bag cement cash sale, 5500 rupees, 18% GST serthu',
+      'ABC Corp indha quarter evvalavu baaki?',
+      'Nethu day book kaattu',
+    ],
+    typeHint: 'Type pannunga illa mic-ah tap pannunga…', yes: 'Sari, post', no: 'Vendam',
   },
 };
 const LANG_KEY = 'kannaku.voiceLang';
-const loadLang = (): VLang => { try { return localStorage.getItem(LANG_KEY) === 'ta' ? 'ta' : 'en'; } catch { return 'en'; } };
+const MUTE_KEY = 'kannaku.voiceMuted';
+const loadLang = (): VLang => { try { const v = localStorage.getItem(LANG_KEY); return v === 'ta' || v === 'tanglish' ? v : 'en'; } catch { return 'en'; } };
 const saveLang = (l: VLang) => { try { localStorage.setItem(LANG_KEY, l); } catch { /* storage blocked */ } };
+const loadMuted = () => { try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; } };
+const saveMuted = (m: boolean) => { try { localStorage.setItem(MUTE_KEY, m ? '1' : '0'); } catch { /* storage blocked */ } };
+const WAKE_KEY = 'kannaku.wakeWord';
+// On unless the user switched it off.
+const loadWake = () => { try { return localStorage.getItem(WAKE_KEY) !== '0'; } catch { return true; } };
+const NOTICE_KEY = 'kannaku.wakeNoticeShown';
+const saveWake = (w: boolean) => { try { localStorage.setItem(WAKE_KEY, w ? '1' : '0'); } catch { /* storage blocked */ } };
+
+/**
+ * "Kannaku" as speech recognition writes it in English and Tamil. It only counts at the start of
+ * what was said ("Kannaku, ABC Corp evvalavu baaki?"), because கணக்கு is also an everyday word.
+ */
+const WAKE_WORDS = [
+  'kannaku', 'kanaku', 'kanakku', 'kannakku', 'kannagu', 'kanagu', 'kannaaku', 'canaku', 'cannaku', 'kanaka', 'kannaka',
+  'கணக்கு', 'கண்ணக்கு', 'கன்னக்கு', 'கனக்கு', 'கண்ணாக்கு', 'கணக்கே',
+];
+const WAKE_RE = new RegExp('^\\s*(?:(?:hey|hi|ok|okay|ஹே|ஏய்|ஹாய்)[\\s,]+)?(?:' + WAKE_WORDS.join('|') + ')(?:[\\s,.!?]+(.*))?$', 'i');
+export const wakeCommand = (heard: string): string | null => {
+  const m = WAKE_RE.exec(heard.trim());
+  return m ? (m[1] ?? '').trim() : null;
+};
 
 function pickVoice(voices: SpeechSynthesisVoice[], locale: string): SpeechSynthesisVoice | null {
   const norm = (x: string) => x.replace('_', '-').toLowerCase();
@@ -77,19 +108,32 @@ function routeFor(r: { screen: string; from: string; to: string; ledgerId: strin
   return map[r.screen] ?? { screen: 'gateway' };
 }
 
-export function VoicePanel({ open, onOpen, onClose }: { open: boolean; onOpen: () => void; onClose: () => void }) {
+interface ChatMsg { id: number; who: 'you' | 'ai'; text: string; lang: VLang; error?: boolean }
+let msgSeq = 0;
+
+export function VoicePanel({ open, onOpen, onClose, onWakeChange }: { open: boolean; onOpen: () => void; onClose: () => void; onWakeChange?: (on: boolean) => void }) {
   const app = useApp();
-  const [log, setLog] = useState<{ who: 'you' | 'ai'; text: string }[]>([]);
+  const [log, setLog] = useState<ChatMsg[]>([]);
   const [interim, setInterim] = useState('');
   const [listening, setListening] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [speakingId, setSpeakingId] = useState<number | null>(null);
   const [pending, setPending] = useState<Extract<VoiceResponse, { kind: 'voucher' | 'reverse' }> | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [typed, setTyped] = useState('');
   const [lang, setLangState] = useState<VLang>(loadLang);
+  const [muted, setMutedState] = useState(loadMuted);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [wakeOn, setWakeOn] = useState(() => Boolean(SR) && loadWake());
+  const [wakeActive, setWakeActive] = useState(false);
+  const [wakeErr, setWakeErr] = useState<string | null>(null);
   const rec = useRef<any>(null);
+  const wakeRec = useRef<any>(null);
+  const audio = useRef<AudioContext | null>(null);
+  const openRef = useRef(onOpen);
+  openRef.current = onOpen;
   const finals = useRef<{ text: string; conf: number }[]>([]);
+  const logRef = useRef<HTMLDivElement>(null);
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
   const handleRef = useRef<(text: string, conf: number | null) => Promise<void>>(async () => {});
@@ -97,10 +141,64 @@ export function VoicePanel({ open, onOpen, onClose }: { open: boolean; onOpen: (
   sessionRef.current = sessionId;
   const langRef = useRef(lang);
   langRef.current = lang;
+  const mutedRef = useRef(muted);
+  mutedRef.current = muted;
   const voicesRef = useRef(voices);
   voicesRef.current = voices;
+  const wakeOnRef = useRef(wakeOn);
+  // Listening for the wake word only makes sense when the AI can answer.
+  const wakeLive = wakeOn && app.status.aiEnabled;
+  wakeOnRef.current = wakeLive;
 
   const setLang = (l: VLang) => { setLangState(l); saveLang(l); };
+  const setMuted = (m: boolean) => { setMutedState(m); saveMuted(m); if (m) { window.speechSynthesis?.cancel(); setSpeakingId(null); } };
+  const setWake = (w: boolean) => {
+    setWakeOn(w); saveWake(w); setWakeErr(null);
+    // Created on this click, so the browser lets it play the "I'm listening" chime later.
+    if (w && !audio.current && 'AudioContext' in window) audio.current = new AudioContext();
+  };
+  useEffect(() => { onWakeChange?.(wakeLive); }, [wakeLive, onWakeChange]);
+
+  // The chime needs an AudioContext, which browsers allow only after the user has clicked or typed
+  // somewhere on the page; create it on the first such interaction.
+  useEffect(() => {
+    const unlock = () => { if (!audio.current && 'AudioContext' in window) audio.current = new AudioContext(); };
+    window.addEventListener('pointerdown', unlock, { once: true, capture: true });
+    window.addEventListener('keydown', unlock, { once: true, capture: true });
+    return () => { window.removeEventListener('pointerdown', unlock, true); window.removeEventListener('keydown', unlock, true); };
+  }, []);
+
+  // Say once that the app is listening, and where to turn it off.
+  useEffect(() => {
+    if (!wakeLive) return;
+    try { if (localStorage.getItem(NOTICE_KEY)) return; localStorage.setItem(NOTICE_KEY, '1'); } catch { return; }
+    app.toast('Listening for “Kannaku”: say it and ask anything. Turn it off in the Voice panel.', 'info');
+  }, [wakeLive, app]);
+
+  /** Two short rising tones: "Kannaku" was heard, now say the command. */
+  const chime = useCallback(() => {
+    const ctx = audio.current;
+    if (!ctx || mutedRef.current) return;
+    void ctx.resume();
+    [660, 880].forEach((f, i) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.frequency.value = f;
+      const t = ctx.currentTime + i * 0.12;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.15, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+      o.connect(g).connect(ctx.destination);
+      o.start(t); o.stop(t + 0.12);
+    });
+  }, []);
+
+  const stopWake = useCallback(() => {
+    const w = wakeRec.current;
+    wakeRec.current = null;       // onend sees this and does not restart
+    setWakeActive(false);
+    try { w?.abort(); } catch { /* already stopped */ }
+  }, []);
 
   // Voices load asynchronously in Chrome and Edge.
   useEffect(() => {
@@ -111,28 +209,54 @@ export function VoicePanel({ open, onOpen, onClose }: { open: boolean; onOpen: (
     return () => window.speechSynthesis.removeEventListener('voiceschanged', load);
   }, []);
 
-  /** Speaks in the reply's language; with no installed voice for it, the reply is shown but not spoken. */
-  const say = useCallback((text: string, then?: () => void, replyLang?: VLang) => {
-    setLog((l) => [...l, { who: 'ai', text }]);
-    if (!('speechSynthesis' in window)) { then?.(); return; }
-    window.speechSynthesis.cancel();
-    const locale = LANGS[replyLang ?? langRef.current].tts;
-    const v = pickVoice(voicesRef.current.length ? voicesRef.current : window.speechSynthesis.getVoices(), locale);
-    if (!v && locale !== 'en-IN') { then?.(); return; }
-    const u = new SpeechSynthesisUtterance(text);
+  // Keep the newest message in view.
+  useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' }); }, [log, interim, busy, pending]);
+
+  /** Reads a message aloud in its language; with no voice for it (or muted) it is only shown. */
+  const speak = useCallback((m: ChatMsg, then?: () => void) => {
+    const synth = 'speechSynthesis' in window ? window.speechSynthesis : null;
+    const locale = LANGS[m.lang].tts;
+    const v = synth ? pickVoice(voicesRef.current.length ? voicesRef.current : synth.getVoices(), locale) : null;
+    if (!synth || mutedRef.current || (!v && locale !== 'en-IN')) { then?.(); return; }
+    synth.cancel();
+    stopWake();                   // don't let the wake listener hear the reply
+    const u = new SpeechSynthesisUtterance(m.text);
     u.lang = locale;
     if (v) u.voice = v;
-    u.rate = 1.05;
-    if (then) u.onend = () => then();
-    window.speechSynthesis.speak(u);
-  }, []);
+    u.rate = m.lang === 'tanglish' ? 0.98 : 1.05;
+    setSpeakingId(m.id);
+    // Browsers sometimes never fire onend (a known Chrome bug); a timer makes sure the
+    // conversation carries on (listening for the answer, or for "Kannaku") either way.
+    let done = false;
+    const finish = (runThen: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(guard);
+      setSpeakingId((id) => (id === m.id ? null : id));
+      if (runThen) then?.();
+    };
+    const guard = setTimeout(() => finish(true), Math.min(60_000, 3000 + m.text.length * 90));
+    u.onend = () => finish(true);
+    u.onerror = (e) => finish(e.error !== 'interrupted' && e.error !== 'canceled');
+    synth.speak(u);
+  }, [stopWake]);
 
-  const startListening = useCallback((autoStopMs?: number) => {
+  const say = useCallback((text: string, then?: () => void, replyLang?: VLang, error = false) => {
+    const m: ChatMsg = { id: ++msgSeq, who: 'ai', text, lang: replyLang ?? langRef.current, error };
+    setLog((l) => [...l, m]);
+    speak(m, then);
+  }, [speak]);
+
+  /** endOnPause: stop when the speaker pauses (answers and wake-word commands); otherwise until stopped. */
+  const startListening = useCallback((autoStopMs?: number, endOnPause = false) => {
     if (!SR || rec.current) return;
+    stopWake();
+    window.speechSynthesis?.cancel();
+    setSpeakingId(null);
     const r = new SR();
     r.lang = LANGS[langRef.current].stt;
     r.interimResults = true;
-    r.continuous = true;
+    r.continuous = !endOnPause;
     finals.current = [];
     r.onresult = (e: any) => {
       let partial = '';
@@ -156,7 +280,7 @@ export function VoicePanel({ open, onOpen, onClose }: { open: boolean; onOpen: (
     setListening(true);
     r.start();
     if (autoStopMs) setTimeout(() => rec.current === r && r.stop(), autoStopMs);
-  }, []);
+  }, [stopWake]);
   const stopListening = useCallback(() => rec.current?.stop(), []);
 
   const apply = useCallback((r: VoiceResponse) => {
@@ -165,12 +289,12 @@ export function VoicePanel({ open, onOpen, onClose }: { open: boolean; onOpen: (
       case 'voucher':
       case 'reverse':
         setPending(r); setSessionId(r.sessionId);
-        // Listen for "confirm" / "cancel" only after the readback has finished.
-        say(r.speech, () => { if (r.kind === 'reverse' || !r.draft.needsScreenConfirm) startListening(6000); }, replyLang);
+        // A conversation: after the readback, listen for "confirm" / "cancel" or a correction.
+        say(r.speech, () => { if (r.kind === 'reverse' || !r.draft.needsScreenConfirm) startListening(10000, true); }, replyLang);
         break;
       case 'clarify':
         setSessionId(r.sessionId);
-        say(r.speech, () => startListening(8000), replyLang);
+        say(r.speech, () => startListening(12000, true), replyLang);
         break;
       case 'navigate':
         setPending(null); setSessionId(null);
@@ -192,7 +316,7 @@ export function VoicePanel({ open, onOpen, onClose }: { open: boolean; onOpen: (
     const p = pendingRef.current;
     if (!p) return;
     try { apply(await api.post<VoiceResponse>(c(`/voice/sessions/${p.sessionId}/confirm`), { channel, lang: langRef.current })); }
-    catch (e) { say(e instanceof ApiError ? e.message : 'Could not post.'); }
+    catch (e) { say(e instanceof ApiError ? e.message : 'Could not post.', undefined, 'en', true); }
   }, [apply, say]);
 
   const cancel = useCallback(async () => {
@@ -202,7 +326,7 @@ export function VoicePanel({ open, onOpen, onClose }: { open: boolean; onOpen: (
   }, [apply]);
 
   const handle = useCallback(async (text: string, confidence: number | null) => {
-    setLog((l) => [...l, { who: 'you', text }]);
+    setLog((l) => [...l, { id: ++msgSeq, who: 'you', text, lang: langRef.current }]);
     const p = pendingRef.current;
     if (p && CONFIRM_RE.test(text.trim())) return confirm('voice');
     if (p && CANCEL_RE.test(text.trim())) return cancel();
@@ -212,10 +336,60 @@ export function VoicePanel({ open, onOpen, onClose }: { open: boolean; onOpen: (
         transcript: text, confidence, sessionId: sessionRef.current, screen: app.route.screen, lang: langRef.current,
       }));
     } catch (e) {
-      say(e instanceof ApiError ? e.message : 'Something went wrong.');
+      say(e instanceof ApiError ? e.message : 'Something went wrong.', undefined, 'en', true);
     } finally { setBusy(false); }
   }, [app.route.screen, apply, cancel, confirm, say]);
   handleRef.current = handle;
+
+  // ---------- "Kannaku" wake word ----------
+  // A background recogniser that only looks for the wake word; it pauses while the assistant
+  // listens to a command or speaks, and resumes when idle.
+  const startWake = useCallback(() => {
+    if (!SR || !wakeOnRef.current || wakeRec.current || rec.current) return;
+    const r = new SR();
+    r.lang = LANGS[langRef.current].stt;
+    r.continuous = true;
+    r.interimResults = false;
+    const started = Date.now();
+    r.onresult = (e: any) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (!e.results[i].isFinal) continue;
+        const command = wakeCommand(e.results[i][0].transcript);
+        if (command === null) continue;
+        stopWake();
+        openRef.current();
+        if (command.length > 1) void handleRef.current(command, e.results[i][0].confidence ?? null);
+        else { chime(); setTimeout(() => startListening(10000, true), 250); }
+        return;
+      }
+    };
+    r.onerror = (e: any) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        setWakeOn(false); saveWake(false);
+        setWakeErr('The browser blocked the microphone, so "Kannaku" cannot be heard. Allow the microphone for this site and switch it on again.');
+      }
+    };
+    r.onend = () => {
+      if (wakeRec.current !== r) return;      // stopped on purpose
+      wakeRec.current = null;
+      setWakeActive(false);
+      // Browsers end long recognition sessions now and then; carry on, slower if it keeps failing.
+      if (wakeOnRef.current) setTimeout(() => startWake(), Date.now() - started < 2000 ? 3000 : 300);
+    };
+    wakeRec.current = r;
+    try { r.start(); setWakeActive(true); } catch { wakeRec.current = null; }
+  }, [chime, startListening, stopWake]);
+
+  // Resume waiting for "Kannaku" whenever the assistant is idle; stop when switched off.
+  useEffect(() => {
+    if (!wakeLive) { stopWake(); return; }
+    if (listening || busy || speakingId !== null) return;
+    const t = setTimeout(startWake, 500);
+    return () => clearTimeout(t);
+  }, [wakeLive, listening, busy, speakingId, lang, startWake, stopWake]);
+  // A language change restarts the recogniser in the new language.
+  useEffect(() => { stopWake(); }, [lang, stopWake]);
+  useEffect(() => () => stopWake(), [stopWake]);
 
   // Hold Ctrl+Space to talk.
   useEffect(() => {
@@ -223,7 +397,6 @@ export function VoicePanel({ open, onOpen, onClose }: { open: boolean; onOpen: (
       if (e.code === 'Space' && (e.ctrlKey || e.metaKey) && !e.repeat) {
         e.preventDefault();
         if (!open) onOpen();
-        window.speechSynthesis?.cancel();
         startListening();
       }
     };
@@ -239,47 +412,93 @@ export function VoicePanel({ open, onOpen, onClose }: { open: boolean; onOpen: (
   if (!open) return null;
   const L = LANGS[lang];
   const preview = pending?.kind === 'voucher' ? pending.draft.preview : null;
-  const missingVoice = lang !== 'en' && voices.length > 0 && !pickVoice(voices, L.tts);
+  const noTamilVoice = lang === 'ta' && voices.length > 0 && !pickVoice(voices, 'ta-IN');
+  const status = listening ? 'Listening…' : busy ? 'Thinking…' : speakingId !== null ? 'Speaking…'
+    : wakeActive ? 'Say “Kannaku” to ask' : SR ? 'Tap the mic or hold Ctrl+Space' : 'Type a message';
+
   return (
-    <aside className="voice" aria-label="Voice assistant" lang={lang === 'ta' ? 'ta' : 'en'}>
-      <div className="voice-head">
-        <strong>Voice</strong>
-        <span className={`dot ${listening ? 'on' : ''}`} aria-hidden />
-        <span className="muted small">{listening ? 'listening…' : busy ? 'thinking…' : SR ? 'hold Ctrl+Space' : 'type below'}</span>
-        <select className="voice-lang" value={lang} onChange={(e) => setLang(e.target.value as VLang)} aria-label="Voice language" disabled={listening}>
-          {(Object.keys(LANGS) as VLang[]).map((k) => <option key={k} value={k}>{LANGS[k].label}</option>)}
-        </select>
-        <button className="ghost" onClick={onClose} aria-label="Close voice panel">×</button>
+    <aside className="voice chat" aria-label="Voice assistant" lang={lang === 'ta' ? 'ta' : 'en'}>
+      <header className="chat-head">
+        <div className={`chat-avatar ${listening ? 'listening' : speakingId !== null ? 'speaking' : ''}`} aria-hidden>K</div>
+        <div className="chat-title">
+          <strong>Kannaku assistant</strong>
+          <span className="muted small">{status}</span>
+        </div>
+        <button className="ghost icon" onClick={() => setMuted(!muted)} aria-pressed={!muted}
+          title={muted ? 'Replies are not read aloud. Click to turn the voice on' : 'Replies are read aloud. Click to mute'}>{muted ? '🔇' : '🔊'}</button>
+        <button className="ghost icon" onClick={onClose} aria-label="Close voice panel">×</button>
+      </header>
+
+      <div className="lang-tabs" role="radiogroup" aria-label="Reply language">
+        {(Object.keys(LANGS) as VLang[]).map((k) => (
+          <button key={k} role="radio" aria-checked={lang === k} className={lang === k ? 'on' : ''} disabled={listening}
+            title={LANGS[k].label} onClick={() => setLang(k)}>{LANGS[k].short}</button>
+        ))}
       </div>
-      {!app.status.aiEnabled && <div className="warn small">Voice needs ANTHROPIC_API_KEY in .env (server restart required).</div>}
-      {missingVoice && <div className="warn small">{L.noVoice}</div>}
-      <div className="voice-log" aria-live="polite">
-        {log.length === 0 && <p className="muted small">Try: {L.examples.map((x) => `“${x}”`).join(' · ')}</p>}
-        {log.slice(-8).map((m, i) => <p key={i} className={m.who}>{m.text}</p>)}
-        {interim && <p className="you interim">{interim}</p>}
-      </div>
-      {preview && pending?.kind === 'voucher' && (
-        <div className="voice-card">
-          <table className="mini"><tbody>{preview.entries.map((e, i) => {
-            const v = BigInt(e.amountMinor);
-            return <tr key={i}><td>{e.ledgerName}</td><td className="num">{v > 0n ? inr(v) : ''}</td><td className="num">{v < 0n ? inr(-v) : ''}</td></tr>;
-          })}</tbody></table>
-          {pending.draft.warnings.map((w) => <div key={w} className="warn small">{w}</div>)}
-          <div className="voice-actions">
-            <button className="primary" onClick={() => void confirm('screen')}>Post <Kbd>Ctrl+A</Kbd></button>
-            <button onClick={() => void cancel()}>Cancel</button>
+
+      {!app.status.aiEnabled && <div className="warn small">Voice needs the AI. <button className="link" onClick={() => app.setAiKeyOpen(true)}>Enter your API key</button></div>}
+      {SR && (
+        <label className="wake-row" title="While on, the browser's speech service (Google in Chrome, Microsoft in Edge) hears the microphone continuously to catch the word.">
+          <input type="checkbox" checked={wakeOn} onChange={(e) => setWake(e.target.checked)} />
+          <span>Start by saying <strong>“Kannaku”</strong>{wakeOn && <span className="muted"> · {wakeActive ? 'listening for it' : 'paused while busy'}</span>}</span>
+          {wakeOn && <span className={`wake-dot ${wakeActive ? 'on' : ''}`} aria-hidden />}
+        </label>
+      )}
+      {wakeErr && <div className="warn small">{wakeErr}</div>}
+      {noTamilVoice && (
+        <div className="warn small">This browser has no Tamil voice, so Tamil replies are shown but not spoken.{' '}
+          <button className="link" onClick={() => setLang('tanglish')}>Switch to Tanglish</button> to hear them.</div>
+      )}
+
+      <div className="chat-log" ref={logRef} aria-live="polite">
+        {log.length === 0 && (
+          <div className="chat-empty">
+            <p className="muted small">{lang === 'tanglish' ? 'Enna pannanum nu sollunga, illa idhula onna tap pannunga:' : lang === 'ta' ? 'என்ன செய்ய வேண்டும் என்று சொல்லுங்கள், அல்லது ஒன்றைத் தட்டுங்கள்:' : 'Say what you need, or tap one of these:'}</p>
+            {L.examples.map((x) => <button key={x} className="chip" onClick={() => void handle(x, null)} disabled={busy}>{x}</button>)}
           </div>
-        </div>
-      )}
-      {pending?.kind === 'reverse' && (
-        <div className="voice-actions">
-          <button className="danger" onClick={() => void confirm('screen')}>Reverse No. {pending.target.voucherNo} <Kbd>Ctrl+A</Kbd></button>
-          <button onClick={() => void cancel()}>Cancel</button>
-        </div>
-      )}
-      <form className="voice-type" onSubmit={(e) => { e.preventDefault(); if (typed.trim()) { void handle(typed.trim(), null); setTyped(''); } }}>
-        <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={L.typeHint} aria-label="Type a command" />
-        {SR && <button type="button" className={listening ? 'primary' : ''} aria-label="Hold to talk" onMouseDown={() => startListening()} onMouseUp={stopListening} onTouchStart={() => startListening()} onTouchEnd={stopListening}>🎙</button>}
+        )}
+        {log.map((m) => (
+          <div key={m.id} className={`bubble ${m.who} ${m.error ? 'error' : ''} ${speakingId === m.id ? 'speaking' : ''}`} lang={m.lang === 'ta' ? 'ta' : 'en'}>
+            <span>{m.text}</span>
+            {m.who === 'ai' && !m.error && (
+              <button className="replay" onClick={() => (speakingId === m.id ? (window.speechSynthesis.cancel(), setSpeakingId(null)) : speak(m))}
+                aria-label={speakingId === m.id ? 'Stop reading' : 'Read aloud'} title={speakingId === m.id ? 'Stop' : 'Read aloud'}>{speakingId === m.id ? '■' : '▶'}</button>
+            )}
+          </div>
+        ))}
+        {interim && <div className="bubble you interim">{interim}</div>}
+        {busy && <div className="bubble ai typing" aria-label="Thinking"><i /><i /><i /></div>}
+
+        {preview && pending?.kind === 'voucher' && (
+          <div className="chat-card">
+            <table className="mini"><tbody>{preview.entries.map((e, i) => {
+              const v = BigInt(e.amountMinor);
+              return <tr key={i}><td>{e.ledgerName}</td><td className="num">{v > 0n ? inr(v) : ''}</td><td className="num">{v < 0n ? inr(-v) : ''}</td></tr>;
+            })}</tbody></table>
+            {pending.draft.warnings.map((w) => <div key={w} className="warn small">{w}</div>)}
+            <div className="chat-actions">
+              <button className="primary" onClick={() => void confirm('screen')}>{L.yes} <Kbd>Ctrl+A</Kbd></button>
+              <button onClick={() => void cancel()}>{L.no}</button>
+            </div>
+          </div>
+        )}
+        {pending?.kind === 'reverse' && (
+          <div className="chat-actions">
+            <button className="danger" onClick={() => void confirm('screen')}>Reverse No. {pending.target.voucherNo} <Kbd>Ctrl+A</Kbd></button>
+            <button onClick={() => void cancel()}>{L.no}</button>
+          </div>
+        )}
+      </div>
+
+      <form className="chat-compose" onSubmit={(e) => { e.preventDefault(); if (typed.trim()) { void handle(typed.trim(), null); setTyped(''); } }}>
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={L.typeHint} aria-label="Type a message" disabled={listening} />
+        {typed.trim()
+          ? <button type="submit" className="send" aria-label="Send">➤</button>
+          : SR && (
+            <button type="button" className={`mic ${listening ? 'on' : ''}`} aria-pressed={listening}
+              aria-label={listening ? 'Stop listening' : 'Start talking'} title={listening ? 'Tap to stop' : 'Tap to talk'}
+              onClick={() => (listening ? stopListening() : startListening())}>🎙</button>
+          )}
       </form>
     </aside>
   );

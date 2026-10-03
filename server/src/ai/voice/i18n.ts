@@ -6,8 +6,8 @@ import type { GroundedField } from './grounding';
  * Everything the voice engine says, in each supported language. Readbacks are built from
  * these templates and the posting plan; the model never writes them (spec 4.5).
  */
-export type Lang = 'en' | 'ta';
-export const LANGS: Lang[] = ['en', 'ta'];
+export type Lang = 'en' | 'ta' | 'tanglish';
+export const LANGS: Lang[] = ['en', 'ta', 'tanglish'];
 
 type TradingType = 'SALES' | 'PURCHASE' | 'CREDIT_NOTE' | 'DEBIT_NOTE';
 type Mode = 'CASH' | 'BANK' | 'CREDIT';
@@ -40,6 +40,7 @@ export interface Messages {
   rateFor(item: string): string;
   whatAmount: string;
   whatGst: string;
+  billNo(party: string | null): string;
   inclusive(amount: string | null): string;
   whoPaymentFor: string;
   whoReceivedFrom: string;
@@ -140,6 +141,7 @@ const en: Messages = {
   rateFor: (item) => `What is the rate for ${item}?`,
   whatAmount: 'What was the amount?',
   whatGst: 'What GST rate applies? Say zero if none.',
+  billNo: (p) => `What is ${p ? `${p}'s` : "the supplier's"} bill number?`,
   inclusive: (a) => `Is that ${a ?? 'rate'} including GST, or plus GST?`,
   whoPaymentFor: 'Who or what was the payment for?',
   whoReceivedFrom: 'Who was the money received from?',
@@ -238,6 +240,7 @@ const ta: Messages = {
   rateFor: (item) => `${item}-இன் விலை என்ன?`,
   whatAmount: 'தொகை எவ்வளவு?',
   whatGst: 'எந்த ஜிஎஸ்டி விகிதம்? ஜிஎஸ்டி இல்லையென்றால் பூஜ்ஜியம் என்று சொல்லுங்கள்.',
+  billNo: (p) => `${p ? `${p}-இன்` : 'சப்ளையரின்'} பில் எண் என்ன?`,
   inclusive: (a) => `${a ?? 'இந்த விலை'} ஜிஎஸ்டி சேர்த்தா, அல்லது ஜிஎஸ்டி தனியாகவா?`,
   whoPaymentFor: 'யாருக்கு அல்லது எதற்காகப் பணம் செலுத்தப்பட்டது?',
   whoReceivedFrom: 'யாரிடமிருந்து பணம் வந்தது?',
@@ -297,6 +300,103 @@ const ta: Messages = {
   reverseQuestion: (t, no, d, a, party) => `${t} எண் ${no}, தேதி ${d}, ${a}${party ? `, ${party}` : ''} — இதை ரத்து செய்யவா? ரத்து செய்ய "சரி" என்று சொல்லுங்கள்.`,
 };
 
-export const MESSAGES: Record<Lang, Messages> = { en, ta };
+/**
+ * Tanglish: Tamil in English letters mixed with English, the way people chat. It reads well with
+ * the Indian English voice every browser has, so replies are spoken even without a Tamil voice.
+ */
+const cap = (x: string) => x[0].toUpperCase() + x.slice(1);
+const tanglish: Messages = {
+  money: en.money,
+  date: en.date,
+  period: (p) => ({
+    TODAY: 'innaiku', YESTERDAY: 'nethu', THIS_WEEK: 'indha week', THIS_MONTH: 'indha month', LAST_MONTH: 'pona month',
+    THIS_QUARTER: 'indha quarter', LAST_QUARTER: 'pona quarter', THIS_FY: 'indha financial year', LAST_FY: 'pona financial year',
+    AS_OF_TODAY: 'ippo varaikkum', UNSPECIFIED: 'ippo varaikkum',
+  } as Record<PeriodName, string>)[p],
+  voucher: en.voucher,
+  screen: en.screen,
+
+  nothingToConfirm: 'Confirm panna edhuvum pending-la illa.',
+  didntCatch: 'Sorry, puriyala. Konjam thirumba sollunga?',
+  sayAgain: 'Konjam thirumba sollunga?',
+  lowConfidenceAmount: (v) => `Amount sariya kettucha nu doubt-ah irukku. ${v} nu sonneengala?`,
+  askFor: (f) => ({ amount: 'Sorry, amount evvalavu?', quantity: 'Sorry, quantity evvalavu?', rate: 'Sorry, rate enna?', gst_rate: 'GST rate evvalavu?' })[f],
+
+  whichDate: 'Endha date-la podanum?',
+  futureDate: (d) => `${d} future date-ah irukku. Endha date sonneenga?`,
+  didYouMean: (names) => `${names.join(' illa ')}, yaara sonneenga?`,
+  partyNotFound: (s) => `${s} nu oru party illa. Mudhalla Alt C vechu add pannunga.`,
+  whichLedger: (s) => `"${s}" endha ledger?`,
+  cashOrCredit: 'Idhu cash sale-ah, illa party-ku credit-ah?',
+  whichSupplier: 'Endha supplier kitta irundhu vaanguneenga?',
+  whichCustomer: 'Endha customer-ku?',
+  whichBank: 'Endha bank account?',
+  whichItem: (s) => `"${s}" endha item?`,
+  howMany: (uom, item) => `${item} evvalavu ${uom}?`,
+  gstFor: (item) => `${item}-ku GST rate evvalavu?`,
+  rateFor: (item) => `${item} rate enna?`,
+  whatAmount: 'Amount evvalavu?',
+  whatGst: 'GST rate evvalavu? GST illana zero nu sollunga.',
+  billNo: (p) => `${p ? `${p}` : 'Supplier'} bill number enna?`,
+  inclusive: (a) => `${a ?? 'Indha rate'} GST serthu-ah, illa GST thaniya-ah?`,
+  whoPaymentFor: 'Yaarukku, illa edhukku payment pannineenga?',
+  whoReceivedFrom: 'Yaar kitta irundhu panam vandhuchu?',
+  cashOrBank: 'Cash-ah illa bank-ah?',
+  journalOnScreen: 'Journal entry-ku rendu ledger-um choose pannanum. Screen-la poda F7 press pannunga.',
+  previewError: (m) => `${m}. Enna maathanum?`,
+  duplicate: (t, mins, no) => `Idhe ${en.voucher(t)}-ah ${mins ? `${mins} nimishathukku munnadi` : 'oru nimishathukulla'} already pottirukeenga (number ${no}).`,
+
+  tradingHeader: (type, mode, party) => {
+    const how = mode === 'CASH' ? 'cash' : mode === 'BANK' ? 'bank' : 'credit';
+    const who = party ? (type === 'PURCHASE' || type === 'DEBIT_NOTE' ? `${party} kitta irundhu ` : `${party}-ku `) : '';
+    return cap(`${who}${how} ${en.voucher(type)}.`);
+  },
+  lines: (l) => `${l.join(', ')}.`,
+  totalWithGst: (t, tax) => `Total ${t}, adhula GST ${tax}.`,
+  totalNoGst: (t) => `Total ${t}, GST illa.`,
+  payment: (t, to, from) => `${to}-ku ${t} payment, ${from}-la irundhu.`,
+  receipt: (t, from, into) => `${from} kitta irundhu ${t} receipt, ${into}-la.`,
+  transfer: (t, from, to) => `${from}-la irundhu ${to}-ku ${t} transfer.`,
+  dated: (d) => `Date ${d}.`,
+  note: (w) => `Note: ${w}`,
+  overLimit: 'Idhu unga voice limit-ah vida adhigam, so post panna Control A press pannunga.',
+  backdated: 'Idhu pazhaya date entry, so post panna Control A press pannunga.',
+  sayConfirm: 'Post panna "sari" sollunga, illa enna maathanum nu sollunga.',
+
+  confirmExpired: 'Confirm panra time mudinjiduchu. Control A press pannunga, illa thirumba sollunga.',
+  draftChanged: 'Read pannadhukku apram draft maariduchu. Thirumba check pannunga.',
+  overLimitConfirm: 'Indha amount voice limit-ah vida adhigam. Post panna Control A press pannunga.',
+  backdatedConfirm: 'Pazhaya date entry-ku screen-la Control A venum.',
+  reversed: (no) => `Reverse panniyachu. Reversal number ${no}.`,
+  posted: (t, no) => `Post panniyachu. ${cap(en.voucher(t))} number ${no}.`,
+  alreadyPosted: (t, no) => `Idhu already ${en.voucher(t)} number ${no}-ah post aayiduchu.`,
+  cancelled: 'Cancel panniyachu. Edhuvum post aagala.',
+
+  whichPartyBy: (s) => `${s} nu endha party-ah sonneenga?`,
+  customersOwe: (a) => `Customers ungalukku mottham ${a} tharanum.`,
+  youOweSuppliers: (a) => `Neenga suppliers-ku mottham ${a} tharanum.`,
+  partyOwes: (n, a) => `${n} ungalukku mottham ${a} tharanum.`,
+  youOweParty: (n, a) => `Neenga ${n}-ku mottham ${a} tharanum.`,
+  noBalance: (n) => `${n}-ku pending balance edhuvum illa.`,
+  fromBillsSince: (a, p, from) => `Adhula ${a} ${p} (${from} la irundhu) potta bills-la irundhu.`,
+  overdue60: (a) => `${a} 60 naalukku mela overdue.`,
+
+  sales: (p, a) => `${cap(p)} sales ${a}, GST serthu.`,
+  purchases: (p, a) => `${cap(p)} purchases ${a}, GST serthu.`,
+  gstPayable: (p, a) => `${cap(p)} kattavendiya net GST ${a}.`,
+  excessItc: (p, a) => `${cap(p)} ungalukku ${a} excess input credit irukku.`,
+  cash: (a) => `Cash in hand ${a}.`,
+  bank: (a) => `Bank balance ${a}.`,
+  profit: (p, a) => `${cap(p)} net profit ${a}.`,
+  loss: (p, a) => `${cap(p)} net loss ${a}.`,
+  whichFigure: 'Endha figure venum?',
+
+  whichLedgerOpen: 'Endha ledger open pannanum?',
+  opening: (s, p) => `${cap(s)}${p ? ` (${p})` : ''} open panren.`,
+  voucherNotFound: (t, no) => (no ? `${t} number ${no} kedaikala.` : `Reverse panna ${t} edhuvum kedaikala.`),
+  reverseQuestion: (t, no, d, a, party) => `${t} number ${no}, date ${d}, ${a}${party ? `, ${party}` : ''}. Idha reverse pannava? Reverse panna "sari" sollunga.`,
+};
+
+export const MESSAGES: Record<Lang, Messages> = { en, ta, tanglish };
 export const msgs = (lang: Lang) => MESSAGES[lang];
-export const asLang = (v: unknown): Lang | null => (v === 'ta' || v === 'en' ? v : null);
+export const asLang = (v: unknown): Lang | null => (v === 'ta' || v === 'en' || v === 'tanglish' ? v : null);

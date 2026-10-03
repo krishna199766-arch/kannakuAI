@@ -21,9 +21,9 @@ import { voiceCandidates, type VoiceCandidates } from '../resolver';
 import { normalizeTranscript } from './normalize';
 import { groundRecordVoucher } from './grounding';
 import { msgs, type Lang, type Messages } from './i18n';
-import { VOICE_TOOLS, type EntityRef, type RecordVoucherCall } from './tools';
+import { normalizeToolInput, VOICE_TOOLS, type EntityRef, type RecordVoucherCall } from './tools';
 
-export const VOICE_PROMPT = 'voice_intent.v2';
+export const VOICE_PROMPT = 'voice_intent.v4';
 const CONFIRM_WINDOW_MS = 60_000;
 
 // Fixed grammar for confirm / cancel (spec 4.5): English, Hinglish, Tamil script and romanised Tamil.
@@ -83,7 +83,9 @@ export async function handleUtterance(db: PGlite, companyId: string, req: VoiceR
   if (!transcript) throw new AppError('EMPTY', 422, 'Nothing was heard');
   let session = req.sessionId ? await loadSession(db, companyId, req.sessionId) : null;
   if (session && session.status !== 'OPEN') session = null;
-  const lang: Lang = hasTamil(transcript) ? 'ta' : req.lang ?? session?.lang ?? 'en';
+  // Tamil script in what was said switches English to Tamil; a Tanglish choice stays Tanglish.
+  const picked: Lang = req.lang ?? session?.lang ?? 'en';
+  const lang: Lang = picked === 'tanglish' ? 'tanglish' : hasTamil(transcript) ? 'ta' : picked;
   const T = msgs(lang);
   const userId = req.userId ?? config.localUserId;
 
@@ -118,7 +120,7 @@ export async function handleUtterance(db: PGlite, companyId: string, req: VoiceR
     `fiscal_year_start: ${fyStart(today, ctx.company.fy_start_month)}`,
     `company_state_code: ${ctx.company.state_code}`,
     `current_screen: ${req.screen ?? 'unknown'}`,
-    `reply_language: ${lang === 'ta' ? 'Tamil' : 'English'}`,
+    `reply_language: ${lang === 'ta' ? 'Tamil' : lang === 'tanglish' ? 'Tanglish' : 'English'}`,
     `open_draft: ${session.last_call ? JSON.stringify(session.last_call) : 'none'}`,
     `</context>`,
     `<candidates>`,
@@ -146,7 +148,7 @@ export async function handleUtterance(db: PGlite, companyId: string, req: VoiceR
     if (resp.stop_reason === 'refusal' || resp.stop_reason === 'max_tokens') throw new ModelStopped(resp.stop_reason);
     const calls = resp.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use');
     if (calls.length !== 1) return keepAsking(turn, null, T.didntCatch);
-    call = { name: calls[0].name, input: calls[0].input };
+    call = { name: calls[0].name, input: normalizeToolInput(calls[0].input) };
   } catch (e) {
     wrapApiError(e);
   }
@@ -196,7 +198,9 @@ async function keepAsking(t: Turn, call: RecordVoucherCall | null, question: str
   await t.db.query(
     `UPDATE voice_sessions SET transcripts = $2, last_call = $3, readback_at = NULL, updated_at = now() WHERE id = $1`,
     [t.s.id, JSON.stringify(t.transcripts), call ? JSON.stringify(call) : null]);
-  return { kind: 'clarify', sessionId: t.s.id, lang: t.lang, speech: question };
+  // A Tanglish reply is spoken by an English voice, which cannot read Tamil script.
+  const speech = t.lang === 'tanglish' && hasTamil(question) ? t.T.sayAgain : question;
+  return { kind: 'clarify', sessionId: t.s.id, lang: t.lang, speech };
 }
 
 async function closeSession(t: Turn) {
@@ -262,9 +266,12 @@ async function recordVoucher(t: Turn, call: RecordVoucherCall, c: VoiceCandidate
     if (anyTax && call.amount_includes_tax === null && (call.amount || call.items.some((i) => i.rate))) {
       return ask(T.inclusive(call.amount ? call.amount.value : null));
     }
+    // A credit purchase must carry the supplier's bill number (GST input credit is claimed against it).
+    if (type === 'PURCHASE' && mode === 'CREDIT' && !call.bill_no) return ask(T.billNo(party?.name ?? null));
     input = {
       voucherType: type, date, counterpartyId: party?.id ?? null, paymentMode: mode, bankLedgerId,
       pricesIncludeTax: Boolean(call.amount_includes_tax), items, narration: call.narration ?? null,
+      partyRefNo: call.bill_no ?? null,
     };
   } else if (type === 'PAYMENT' || type === 'RECEIPT') {
     if (!call.amount) return ask(T.whatAmount);

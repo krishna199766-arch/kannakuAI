@@ -271,6 +271,50 @@ describe('Tamil voice end to end (model mocked)', () => {
     expect(r.speech).toContain('தர வேண்டும்');
   });
 
+  it('replies in Tanglish when picked, even to Tamil script, and posts on "sari"', async () => {
+    let context = '';
+    createMock.mockImplementationOnce(async (req: { messages: { content: string }[] }) => {
+      context = req.messages[0].content;
+      const p = /(p\d+): party "Rajesh Traders"/.exec(context)![1];
+      const i = /(i\d+): item "Cement OPC 53 Grade"/.exec(context)![1];
+      return toolUse('record_voucher', {
+        voucher_type: 'SALES', date: '', party: { candidate_id: p, spoken: 'ராஜேஷ் டிரேடர்ஸ்' }, payment_mode: 'CASH',
+        items: [{ entity: { candidate_id: i, spoken: 'சிமெண்ட்' }, quantity: { value: '10', spoken: '10 மூட்டை' }, unit: 'bag', rate: { value: '', spoken: '' } }],
+        other_ledger: { candidate_id: '', spoken: '' }, amount: { value: '4400', spoken: '4400 ரூபாய்' }, amount_includes_tax: 'YES', gst_rate_percent: '18', narration: '', missing: [],
+      });
+    });
+    const r = await handleUtterance(db, companyId, {
+      transcript: 'ராஜேஷ் டிரேடர்ஸ்-க்கு பத்து மூட்டை சிமெண்ட் ரொக்க விற்பனை, நாலாயிரத்து நானூறு ரூபாய், 18% ஜிஎஸ்டி சேர்த்து', lang: 'tanglish',
+    });
+    expect(context).toContain('reply_language: Tanglish');
+    expect(r).toMatchObject({ kind: 'voucher', lang: 'tanglish' });
+    expect(r.speech).toContain('Rajesh Traders-ku cash sale.');
+    expect(r.speech).toContain('Total 4,400 rupees, adhula GST 671 rupees 18 paise.');
+    expect(r.speech).toContain('"sari" sollunga');
+    expect(r.speech).not.toMatch(/[஀-௿]/);   // no Tamil script: an English voice reads it
+    const posted = await handleUtterance(db, companyId, { transcript: 'sari', sessionId: r.sessionId, lang: 'tanglish' });
+    expect(posted.speech).toMatch(/^Post panniyachu\. Sale number \d+\.$/);
+  });
+
+  it('asks for the supplier bill number on a credit purchase, in Tanglish', async () => {
+    createMock.mockImplementationOnce(async (req: { messages: { content: string }[] }) => {
+      const p = /(p\d+): party "Shree Balaji Cement Agency"/.exec(req.messages[0].content)![1];
+      return toolUse('record_voucher', {
+        voucher_type: 'PURCHASE', date: '', party: { candidate_id: p, spoken: 'Shree Balaji Cement' }, payment_mode: 'CREDIT', items: [],
+        other_ledger: { candidate_id: '', spoken: '' }, amount: { value: '8000', spoken: '8000' }, amount_includes_tax: 'YES', gst_rate_percent: '28',
+        bill_no: '', narration: '', missing: [],
+      });
+    });
+    const r = await handleUtterance(db, companyId, { transcript: 'Shree Balaji Cement kitta credit-la 8000 rupees purchase, 28% GST serthu', lang: 'tanglish' });
+    expect(r).toMatchObject({ kind: 'clarify', speech: 'Shree Balaji Cement Agency bill number enna?' });
+  });
+
+  it('never sends Tamil script to the English voice in Tanglish mode', async () => {
+    createMock.mockImplementationOnce(async () => toolUse('clarify', { question: 'எந்த வாடிக்கையாளருக்கு?' }));
+    const r = await handleUtterance(db, companyId, { transcript: 'oru sale podu', lang: 'tanglish' });
+    expect(r).toMatchObject({ kind: 'clarify', lang: 'tanglish', speech: 'Konjam thirumba sollunga?' });
+  });
+
   it('uses Tamil when the user picked Tamil but typed romanised Tamil', async () => {
     createMock.mockImplementationOnce(async () => toolUse('clarify', { question: 'எந்த வாடிக்கையாளருக்கு?' }));
     const r = await handleUtterance(db, companyId, { transcript: 'oru vitpanai podu', lang: 'ta' });
