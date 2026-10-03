@@ -1,0 +1,19 @@
+{
+  "name": "ledgerai",
+  "private": true,
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "npm run dev --workspace server",
+    "dev:web": "npm run dev --workspace web",
+    "build": "npm run build --workspace web",
+    "start": "npm run build && npm run start --workspace server",
+    "test": "npm test --workspace server",
+    "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace web",
+    "reset-db": "npm run reset-db --workspace server",
+    "demo:bill": "npm run demo:bill --workspace server"
+  }
+}

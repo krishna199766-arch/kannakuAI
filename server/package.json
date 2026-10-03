@@ -1,0 +1,28 @@
+{
+  "name": "@ledgerai/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/main.ts",
+    "start": "tsx src/main.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "reset-db": "tsx src/scripts/reset-db.ts",
+    "demo:bill": "tsx src/scripts/demo-bill.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@electric-sql/pglite": "^0.5.8",
+    "@fastify/multipart": "^10.1.2",
+    "@fastify/static": "^10.1.5",
+    "decimal.js": "^10.6.0",
+    "fastify": "^5.12.5",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

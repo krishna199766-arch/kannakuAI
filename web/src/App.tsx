@@ -1,0 +1,159 @@
+import { useEffect, useState } from 'react';
+import { AppProvider, useApp, type Route } from './state';
+import { dispatchKey, useGlobalKeys } from './keys';
+import { Kbd } from './components/ui';
+import { Palette } from './components/Palette';
+import { VoicePanel } from './components/Voice';
+import { Gateway } from './screens/Gateway';
+import { VoucherEntry } from './screens/VoucherEntry';
+import { Daybook } from './screens/Daybook';
+import { VoucherView } from './screens/VoucherView';
+import { Ageing, BalanceSheet, GstSummary, LedgerStatement, ProfitLoss, StockSummary, TrialBalance } from './screens/Reports';
+import { Masters, Settings } from './screens/Masters';
+import { ReviewDoc, ReviewQueue } from './screens/Review';
+import { fmtDate } from './format';
+import { Modal } from './components/ui';
+import { CompanyForm } from './components/CompanyForm';
+
+const VOUCHER_KEYS: Record<string, string> = { F4: 'CONTRA', F5: 'PAYMENT', F6: 'RECEIPT', F7: 'JOURNAL', F8: 'SALES', F9: 'PURCHASE', 'Alt+F6': 'CREDIT_NOTE', 'Alt+F5': 'DEBIT_NOTE' };
+
+function Screen({ route }: { route: Route }) {
+  const p = route.params ?? {};
+  switch (route.screen) {
+    case 'voucher': return <VoucherEntry params={p} />;
+    case 'daybook': return <Daybook params={p} />;
+    case 'voucher-view': return <VoucherView params={p as { id: string }} />;
+    case 'tb': return <TrialBalance />;
+    case 'pl': return <ProfitLoss />;
+    case 'bs': return <BalanceSheet />;
+    case 'ageing': return <Ageing params={p} />;
+    case 'ledger': return <LedgerStatement params={p} />;
+    case 'stock': return <StockSummary />;
+    case 'gst': return <GstSummary />;
+    case 'masters': return <Masters />;
+    case 'review': return <ReviewQueue params={p} />;
+    case 'review-doc': return <ReviewDoc params={p as { id: string }} />;
+    case 'settings': return <Settings />;
+    default: return <Gateway />;
+  }
+}
+
+function Shell({ toasts }: { toasts: { id: number; msg: string; kind: string }[] }) {
+  const app = useApp();
+  const [palette, setPalette] = useState(false);
+  const [voice, setVoice] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { dispatchKey(e); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Global keys: any screen's own map takes precedence.
+  const global: Record<string, () => boolean | void> = {
+    'Ctrl+K': () => setPalette(true),
+    'Alt+G': () => setPalette(true),
+    'Ctrl+U': () => app.go({ screen: 'review', params: { upload: true } }),
+    'Alt+H': () => app.home(),
+    Escape: () => { if (app.stackDepth > 1) app.back(); else return false; },
+  };
+  for (const [k, t] of Object.entries(VOUCHER_KEYS)) global[k] = () => app.go({ screen: 'voucher', params: { type: t } });
+  useGlobalKeys(global);
+
+  const route = app.route;
+  return (
+    <div className="app">
+      <header className="topbar">
+        <button className="brand" onClick={app.home} title="Gateway (Alt+H)">Kannaku AI</button>
+        <CompanySwitcher />
+        <div className="top-actions">
+          <button onClick={() => setPalette(true)}>Go to <Kbd>Ctrl+K</Kbd></button>
+          <button className={voice ? 'on' : ''} onClick={() => setVoice((v) => !v)} title="Hold Ctrl+Space to talk">Voice <Kbd>Ctrl+Space</Kbd></button>
+          <span className={`ai-chip ${app.status.aiEnabled ? 'on' : 'off'}`} title={app.status.aiEnabled ? `Model ${app.status.model}` : 'Set ANTHROPIC_API_KEY to enable'}>AI {app.status.aiEnabled ? 'on' : 'off'}</span>
+          <UserMenu />
+        </div>
+      </header>
+
+      <main className="content" key={`${route.screen}-${app.stackDepth}`}>
+        <Screen route={route} />
+      </main>
+
+      <footer className="keybar" aria-label="Keyboard shortcuts">
+        {app.stackDepth > 1 && <span><Kbd>Esc</Kbd> Back</span>}
+        <span><Kbd>F8</Kbd> Sales</span><span><Kbd>F9</Kbd> Purchase</span><span><Kbd>F5</Kbd> Payment</span><span><Kbd>F6</Kbd> Receipt</span>
+        <span><Kbd>F4</Kbd> Contra</span><span><Kbd>F7</Kbd> Journal</span><span><Kbd>Ctrl+U</Kbd> Scan bill</span><span><Kbd>Alt+H</Kbd> Home</span>
+      </footer>
+
+      {palette && <Palette onClose={() => setPalette(false)} />}
+      <VoicePanel open={voice} onOpen={() => setVoice(true)} onClose={() => setVoice(false)} />
+      <div className="toasts" aria-live="polite">{toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.msg}</div>)}</div>
+    </div>
+  );
+}
+
+export default function App() {
+  return <AppProvider>{(toasts) => <Shell toasts={toasts} />}</AppProvider>;
+}
+
+/** Company name in the top bar; opens a list of the user's businesses and "Add a business". */
+function CompanySwitcher() {
+  const app = useApp();
+  const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('.company-switch')) setOpen(false); };
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [open]);
+  return (
+    <div className="company-switch">
+      <button className="company" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} title="Switch business">
+        <strong>{app.company.name} <span aria-hidden>▾</span></strong>
+        <span className="muted">{app.company.gstin ?? 'GSTIN not set'} · {fmtDate(app.status.today)}</span>
+      </button>
+      {open && (
+        <div className="menu-pop" role="menu">
+          {app.companies.map((co) => (
+            <button key={co.id} role="menuitemradio" aria-checked={co.id === app.company.id} className={co.id === app.company.id ? 'on' : ''}
+              onClick={() => { setOpen(false); if (co.id !== app.company.id) app.switchCompany(co.id); }}>
+              <span>{co.name}</span><small>{co.gstin ?? app.status.states[co.stateCode] ?? ''}</small>
+            </button>
+          ))}
+          <hr />
+          <button role="menuitem" onClick={() => { setOpen(false); setAdding(true); }}>+ Add a business</button>
+        </div>
+      )}
+      {adding && (
+        <Modal title="Add a business" onClose={() => setAdding(false)}>
+          <CompanyForm states={app.status.states} submitLabel="Create books" onCreated={(id) => { setAdding(false); void app.reloadCompanies(id); app.toast('Business added'); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function UserMenu() {
+  const app = useApp();
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('.user-menu')) setOpen(false); };
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [open]);
+  const initials = app.user.name.trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+  return (
+    <div className="user-menu">
+      <button className="avatar" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} title={app.user.name}>{initials}</button>
+      {open && (
+        <div className="menu-pop right" role="menu">
+          <div className="menu-who"><strong>{app.user.name}</strong><small>{app.user.email}</small></div>
+          <hr />
+          <button role="menuitem" onClick={() => { setOpen(false); app.go({ screen: 'settings' }); }}>Company settings</button>
+          <button role="menuitem" onClick={() => void app.logout()}>Log out</button>
+        </div>
+      )}
+    </div>
+  );
+}
